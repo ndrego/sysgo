@@ -6,12 +6,9 @@ import (
 
 type DriverInterface interface {
 	GetValue() Value
+	GetLastValue() Value
 }
 
 type ReceiverInterface interface {
 	SetValue(Value)
-}
-
-type Port struct {
-
 }

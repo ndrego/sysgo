@@ -8,6 +8,7 @@ type Wire struct {
 	drivers []DriverInterface
 	receivers []ReceiverInterface
 	currentValue Value
+	lastValue Value
 }
 
 func (A *Wire) computeValue() {
@@ -21,6 +22,7 @@ func (A *Wire) computeValue() {
 		v = Undefined
 	}
 
+	A.lastValue = A.currentValue
 	A.currentValue = v
 }
 
@@ -33,4 +35,8 @@ func (A *Wire) propagate() {
 
 func (A *Wire) GetValue() Value {
 	return A.currentValue
+}
+
+func (A *Wire) GetLastValue() Value {
+	return A.lastValue
 }

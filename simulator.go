@@ -95,28 +95,50 @@ func (A *Simulator) Run() {
 	A.simChan = make(chan simInternalEvent, 10) // Should this be changed to some other value?
 	go A.runInitializers()
 	// Need to wait
-	A.waitOnInitializers()
+	finished := A.waitOnInitializers()
+
+	if finished {
+		fmt.Printf("Simulation complete at time %0.6f\n", A.simTime)
+		return
+	}
+
+	// Update registers, wires, ports.
+	// May want to parallelize this operation in the future, but
+	// need to be careful to organize it correctly.
+	wg := new(sync.WaitGroup)
+	wg.Add(len(A.modules))
+	for _, m := range A.modules {
+		go A.updateRegisters(m, wg)
+	}
+	wg.Wait()
+
+	wg.Add(len(A.modules))
+	for _, m := range A.modules {
+		go A.propagateWires(m, wg)
+	}
+	wg.Wait()
 }
 
-func (A *Simulator) waitOnInitializers() {
+func (A *Simulator) waitOnInitializers() bool {
 
 WaitLoop:
 	for {
 		event, ok := <- A.simChan
 		if !ok {
 			close(A.simChan)
-			return
+			return false
 		} else {
 			switch event {
 			case allInitsComplete, zeroTimeInitsComplete:
 				// Can proceed now
 				break WaitLoop
 			case simFinish:
-				fmt.Printf("Simulation complete at time %0.6f\n", A.simTime)
-				return
+				return true
 			}
 		}
 	}
+
+	return false
 }
 
 
@@ -173,3 +195,44 @@ Loop:
 
 	targetTime = sim.simTime + del
 } */
+
+func (A *Simulator) updateRegisters(m *Module, wg *sync.WaitGroup) {
+	subWG := new(sync.WaitGroup)
+	subWG.Add(len(m.SubModules) + 1)
+	for _, sm := range m.SubModules {
+		go A.updateRegisters(sm, subWG)
+	}
+
+	// First go through the module's registers
+	for _, r := range m.Registers {
+		if r.modified {
+			// TODO: Need to let any sensitivity clauses know
+			// that there is a change. And record the change
+			// if we're recording this module.
+			r.lastValue = r.currentValue
+			r.currentValue = r.nextValue
+			fmt.Printf("Set %s.%s (%d -> %d). Simtime: %d\n", m.Name, r.Name, r.lastValue, r.currentValue, A.simTime)
+			r.modified = false
+		}
+	}
+	subWG.Done()
+	subWG.Wait()
+	
+	wg.Done()
+}
+
+func (A *Simulator) propagateWires(m *Module, wg *sync.WaitGroup) {
+	subWG := new(sync.WaitGroup)
+	subWG.Add(len(m.SubModules) + 1)
+	for _, sm := range m.SubModules {
+		go A.propagateWires(sm, subWG)
+	}
+
+	for _, w := range m.Wires {
+		w.computeValue()
+	}
+	subWG.Done()
+	subWG.Wait()
+	
+	wg.Done()
+}

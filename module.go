@@ -37,3 +37,4 @@ func (A *Module) getAllInitializers() (iFuncs []InitializerFunc) {
 	}
 	return
 }
+
