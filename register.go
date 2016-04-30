@@ -12,6 +12,15 @@ type Register struct {
 	modified bool
 }
 
+func (A *Register) updateValue() {
+	if A.modified {
+		A.lastValue = A.currentValue
+		A.currentValue = A.nextValue
+		A.modified = false
+	}
+
+}
+
 func (A *Register) SetValue(v Value) error {
 	if A.modified {
 		return fmt.Errorf("Setting register %s multiple times in same event.", A.Name)

@@ -2,34 +2,41 @@ package sysgo
 
 import (
 	"fmt"
-	_ "math"
+	"math"
+	"math/rand"
 	"sync"
-)
-
-type ProceduralBlockEvent uint8
-const (
-	Complete ProceduralBlockEvent = iota
-	BlockOnDelay
-	SimFinish
 )
 
 type simInternalEvent uint32
 const (
-	allInitsComplete simInternalEvent = iota
-	zeroTimeInitsComplete
-	proceduralBlockError
+	blockRun simInternalEvent = 1 << iota
+	blockComplete
+	blockProgress
+	blockWait
+	blockError
+	delayWait	
+	updateRegisters
+	registerUpdateComplete
+	propagateWireValues
+	wirePropagateComplete
 	simFinish
+	allEvents = 0xffffffff
 )
 
-type SimulatorEventType uint32
+type simChanType uint32
 const (
-	Timestep SimulatorEventType = iota
-	SensitivityMatch
+	module simChanType = 1 << iota
+	initializer
+	sensitivity
+	allChanTypes = 0xffffffff
 )
 
-type SimulatorEvent struct {
-	Type SimulatorEventType
-	Data interface{}
+type SimChanPair struct {
+	send chan simInternalEvent // Send from module/initializer/etc. to simulator
+	recv chan simInternalEvent // Receive by module/initializer/etc.
+	chanType simChanType
+	data interface{}
+	dataMutex sync.Mutex
 }
 
 type Simulator struct {
@@ -38,17 +45,15 @@ type Simulator struct {
 	modules []*Module
 
 	simTime uint64
+	simTimeMutex sync.Mutex
 	
-	// Used to tell if an initializer block is complete or just
-	// waiting on a delay.
-	initBlock chan ProceduralBlockEvent
+	// Internal simulator event channels
+	simChans map[int64]*SimChanPair
+	simChansMutex sync.Mutex
+	simChanCounts map[simChanType]uint
 
-	// Internal simulator event channel
-	simChan chan simInternalEvent
-
-	delayChannels []chan SimulatorEvent
-	// senseChannelMap map[string]chan Event
-
+	runnersWG *sync.WaitGroup
+	
 	numInitBlocks uint32
 	numSenseClauses uint32
 }
@@ -68,7 +73,12 @@ func (A *Simulator) Initialize(timescale, precision float64) {
 	A.timescale = timescale
 	A.precision = precision
 	A.modules = make([]*Module, 0, 10)
-	A.delayChannels = make([]chan SimulatorEvent, 0, 10)
+	A.simChans = make(map[int64]*SimChanPair)
+	A.simChanCounts = make(map[simChanType]uint)
+
+	A.simChanCounts[module] = uint(0)
+	A.simChanCounts[initializer] = uint(0)
+	A.simChanCounts[sensitivity] = uint(0)
 }
 
 // This should only be called once per *TOP-LEVEL* module
@@ -79,6 +89,24 @@ func (A *Simulator) RegisterModule(m *Module) {
 	n, s := m.getNumBlocks()
 	A.numInitBlocks += n
 	A.numSenseClauses += s
+}
+
+func (A *Simulator) RegisterChannelPair(cp *SimChanPair) (chanId int64) {
+	chanId = rand.Int63()
+	A.simChansMutex.Lock()
+	defer A.simChansMutex.Unlock()
+	
+	A.simChans[chanId] = cp
+	A.simChanCounts[cp.chanType]++
+	return chanId
+}
+
+func (A *Simulator) UnregisterChannelPair(chanId int64) {
+	A.simChansMutex.Lock()
+	defer A.simChansMutex.Unlock()
+	
+	A.simChanCounts[A.simChans[chanId].chanType]--
+	delete(A.simChans, chanId)
 }
 
 func (A *Simulator) Run() {
@@ -92,147 +120,231 @@ func (A *Simulator) Run() {
 
         */
 
-	A.simChan = make(chan simInternalEvent, 10) // Should this be changed to some other value?
-	go A.runInitializers()
-	// Need to wait
-	finished := A.waitOnInitializers()
+	blockReadyWG := new(sync.WaitGroup)
+	A.runnersWG = new(sync.WaitGroup)
 
-	if finished {
-		fmt.Printf("Simulation complete at time %0.6f\n", A.simTime)
-		return
+	blockReadyWG.Add(int(A.numInitBlocks + A.numSenseClauses))
+	A.runnersWG.Add(1)
+
+	go A.spawnRunners(blockReadyWG)
+
+	blockReadyWG.Wait()
+		
+	// Main event coordination loop
+	for finish := false; !finish; {
+		A.sendToChannels(initializer | sensitivity, blockRun, false)
+
+		// May need a mutex on simChanCounts
+		expEventCount := A.simChanCounts[initializer] + A.simChanCounts[sensitivity]
+		// fmt.Printf("simTime: %d, expEventCount: %d\n", A.simTime, expEventCount)
+
+		// Wait for a timestep complete from at least the remaining initializers and
+		// all sensitivity clauses
+		// fmt.Printf("Waiting for %d channels...\n", expEventCount)		
+		m := A.waitForChannels(allChanTypes, blockProgress | blockWait | blockComplete | delayWait | simFinish, expEventCount)
+
+		finish = getEventCounts(simFinish, m) > 0
+		delayCount := getEventCounts(delayWait, m)
+		blockWaitCount := getEventCounts(blockWait, m)
+
+		A.sendToChannels(module, updateRegisters, true)
+		A.waitForChannels(module, registerUpdateComplete, A.simChanCounts[module])
+
+		A.sendToChannels(module, propagateWireValues, true)
+		A.waitForChannels(module, wirePropagateComplete, A.simChanCounts[module])
+
+		// Increment simTime if everything is just waiting
+		if (delayCount + blockWaitCount) == expEventCount {
+			// Find the minimum target time and fast-forward
+			min := uint64(0xffffffffffffffff)
+			for _, cp := range A.simChans {
+				cp.dataMutex.Lock()
+				switch d := cp.data.(type) {
+				case nil:
+				case uint64:
+					tt := d
+					if tt > 0 && tt < min {
+						min = tt
+					}
+				}
+				cp.dataMutex.Unlock()
+			}
+			// fmt.Printf("Fast-forwarding to %d\n", min)
+			A.simTimeMutex.Lock()
+			A.simTime = min
+			A.simTimeMutex.Unlock()
+		}
 	}
 
-	// Update registers, wires, ports.
-	// May want to parallelize this operation in the future, but
-	// need to be careful to organize it correctly.
+	fmt.Printf("Simulator: out of main event loop.\n")
+
+	A.sendToChannels(allChanTypes, simFinish, true)
+	
+	A.runnersWG.Wait()
+}
+
+func getEventCounts(e simInternalEvent, m map[simInternalEvent]uint) (n uint) {
+	n = 0
+	if _, ok := m[e]; ok {
+		n = m[e]
+	}
+	return
+}
+
+func (A *Simulator) spawnRunners(blockReadyWG *sync.WaitGroup) {
+	defer A.runnersWG.Done()
+	
 	wg := new(sync.WaitGroup)
 	wg.Add(len(A.modules))
+	
+	// Spawn all module runners
 	for _, m := range A.modules {
-		go A.updateRegisters(m, wg)
+		go m.run(wg, blockReadyWG)
 	}
-	wg.Wait()
 
-	wg.Add(len(A.modules))
-	for _, m := range A.modules {
-		go A.propagateWires(m, wg)
-	}
 	wg.Wait()
 }
 
-func (A *Simulator) waitOnInitializers() bool {
+func newSimChannelPair(t simChanType) (cp *SimChanPair) {
+	cp = new(SimChanPair)
+	cp.send = make(chan simInternalEvent, 1)
+	cp.recv = make(chan simInternalEvent, 1)
+	cp.chanType = t
 
-WaitLoop:
-	for {
-		event, ok := <- A.simChan
-		if !ok {
-			close(A.simChan)
-			return false
-		} else {
-			switch event {
-			case allInitsComplete, zeroTimeInitsComplete:
-				// Can proceed now
-				break WaitLoop
-			case simFinish:
-				return true
-			}
-		}
-	}
-
-	return false
+	return
 }
 
-
-func (A *Simulator) runInitializers() {
-	A.initBlock = make(chan ProceduralBlockEvent, A.numInitBlocks)
-
-	fmt.Printf("There are %d registered modules\n", len(A.modules))
-	for _, m := range A.modules {
-		iFuncs := m.getAllInitializers()
-		for _, i := range iFuncs {
-			go i(A.initBlock)
+func (A *Simulator) sendToChannels(chanMask simChanType, e simInternalEvent, blocking bool) (c uint) {
+	c = 0
+	A.simChansMutex.Lock()
+	defer A.simChansMutex.Unlock()
+	for _, cp := range A.simChans {
+		if cp.chanType & chanMask > 0 {
+			// fmt.Printf("Sending %d to 0x%x\n", e, pairId)
+			if blocking {
+				cp.recv <- e
+			} else {
+				select {
+				case cp.recv <- e:
+				default:
+				}
+			}
+			c++
 		}
 	}
-
-	// Process the init block events
-	initsComplete := uint32(0)
-	blocksOnDelays := uint32(0)
-Loop:
-	for {
-		event, ok := <-A.initBlock
-		if !ok {
-			close(A.simChan)
-			return
-		} else {
-			switch event {
-			case Complete:
-				initsComplete += 1
-			case BlockOnDelay:
-				blocksOnDelays += 1
-			case SimFinish:
-				A.simChan <- simFinish
-				break Loop
-			}
-
-			if initsComplete == A.numInitBlocks {
-				A.simChan <- allInitsComplete
-				break Loop
-			}
-			if initsComplete + blocksOnDelays == A.numInitBlocks {
-				A.simChan <- zeroTimeInitsComplete
-			}
-		}
-		
-	}
-	fmt.Printf("initsComplete: %d\n", initsComplete)
+	return
 }
 
-/* func Delay(d float64, c chan<- ProceduralBlockEvent) {
+func (A *Simulator) waitForChannels(chanMask simChanType, eventMask simInternalEvent, minCount uint) map[simInternalEvent]uint {
+	m := make(map[simInternalEvent]uint)
+	n := uint(0)
+	for {
+		A.simChansMutex.Lock()
+		for _, cp := range A.simChans {
+			if cp.chanType & chanMask > 0 {
+				// Non-blocking read
+				select {
+				case e := <- cp.send:
+					// fmt.Printf("Got event %d on chan 0x%x\n", e, pairId)
+					if e & eventMask > 0 {
+						if _, ok := m[e]; ok {
+							m[e]++
+						} else {
+							m[e] = 1
+						}
+						switch e {
+						case blockComplete:
+							close(cp.recv)
+						}
+						n++
+						//fmt.Printf("Got %d/%d events\n", n, minCount)
+					}
+				default:
+					break
+				}
+			}
+			
+		}
+		A.simChansMutex.Unlock()
+		if n >= minCount {
+			break
+		}
+	}
+
+	return m
+}
+
+func waitForEvents(c chan simInternalEvent, eventMask simInternalEvent) simInternalEvent {
+	for {
+		event, ok := <- c
+		if !ok {
+			close(c)
+			return simFinish
+		} else {
+			if event & eventMask > 0 {
+				return event
+			}
+		}
+	}
+}
+
+/*
+    Waits until the simulator proceeds from the current simTime to 
+    simTime + d. Returns true if it waited for the entire delay or false
+    if a simFinish event occurred during the delay.
+*/
+func Delay(cp *SimChanPair, d float64) bool {
 	sim := GetSimulator()
 
-	// Round d to precision
-	var del uint64
-	del = uint64(math.Floor(d / sim.precision + 0.5))
+	sim.simTimeMutex.Lock()
+	simTime := sim.simTime
+	sim.simTimeMutex.Unlock()
 
-	targetTime = sim.simTime + del
-} */
+	// Compute target time by rounding the delay
+	
+	targetTime := uint64(math.Floor(d * (sim.timescale / sim.precision) + 0.5)) + simTime
 
-func (A *Simulator) updateRegisters(m *Module, wg *sync.WaitGroup) {
-	subWG := new(sync.WaitGroup)
-	subWG.Add(len(m.SubModules) + 1)
-	for _, sm := range m.SubModules {
-		go A.updateRegisters(sm, subWG)
+	// Catch corner cases
+	if targetTime == simTime {
+		return true
 	}
 
-	// First go through the module's registers
-	for _, r := range m.Registers {
-		if r.modified {
-			// TODO: Need to let any sensitivity clauses know
-			// that there is a change. And record the change
-			// if we're recording this module.
-			r.lastValue = r.currentValue
-			r.currentValue = r.nextValue
-			fmt.Printf("Set %s.%s (%d -> %d). Simtime: %d\n", m.Name, r.Name, r.lastValue, r.currentValue, A.simTime)
-			r.modified = false
+	// Send a delayWait event
+	cp.dataMutex.Lock()
+	cp.data = targetTime
+	cp.dataMutex.Unlock()
+	cp.send <- delayWait
+
+	// Now wait until the correct timestep
+	for {
+		e := waitForEvents(cp.recv, blockRun | simFinish)
+		switch e {
+		case simFinish:
+			return false
+		case blockRun:
+			sim.simTimeMutex.Lock()
+			if sim.simTime >= targetTime {
+				sim.simTimeMutex.Unlock()
+				cp.dataMutex.Lock()
+				cp.data = uint64(0)
+				cp.dataMutex.Unlock()
+				return true
+			} else {
+				select {
+				case cp.send <- delayWait:
+				default:
+				}
+			}
+			sim.simTimeMutex.Unlock()
 		}
 	}
-	subWG.Done()
-	subWG.Wait()
-	
-	wg.Done()
 }
 
-func (A *Simulator) propagateWires(m *Module, wg *sync.WaitGroup) {
-	subWG := new(sync.WaitGroup)
-	subWG.Add(len(m.SubModules) + 1)
-	for _, sm := range m.SubModules {
-		go A.propagateWires(sm, subWG)
-	}
-
-	for _, w := range m.Wires {
-		w.computeValue()
-	}
-	subWG.Done()
-	subWG.Wait()
+func SimTime() uint64 {
+	sim := GetSimulator()
+	sim.simTimeMutex.Lock()
+	simTime := sim.simTime
+	sim.simTimeMutex.Unlock()
 	
-	wg.Done()
+	return simTime
 }

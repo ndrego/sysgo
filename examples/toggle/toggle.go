@@ -12,18 +12,24 @@ type ToggleModule struct {
 func NewToggleModule() (tm *ToggleModule) {
 	clk := sysgo.NewRegister("clk")
 
-	init := func(c chan<- sysgo.ProceduralBlockEvent) {
+	init := func(cp *sysgo.SimChanPair) (bool, error){
 		fmt.Printf("Setting clk initial value to 0\n")
 		clk.SetValue(sysgo.Lo)
+		sysgo.Delay(cp, 100)
 
-		c <- sysgo.Complete
+		return true, nil // Indicates the sim should finish
 	}
 
-	ssFunc := func() error {
-		// sysgo.Delay(5)
+	ssFunc := func(cp *sysgo.SimChanPair) (bool, error) {
+		waitComplete := sysgo.Delay(cp, 5)
+		if !waitComplete {
+			return true, nil
+		}
+
+		fmt.Printf("clk toggle @ %d: %d\n", sysgo.SimTime(), clk.GetValue())
 		clk.SetValue(clk.GetValue().Invert())
 
-		return nil
+		return false, nil
 	}
 
 	sc := sysgo.NewSensitivityClause(ssFunc)
@@ -40,7 +46,7 @@ func NewToggleModule() (tm *ToggleModule) {
 func main() {
 	tm := NewToggleModule()
 	sim := sysgo.GetSimulator()
-	sim.Initialize(1e-9, 1e-12)
+	sim.Initialize(1e-9, 1e-9)
 	sim.RegisterModule(&tm.Module)
 	sim.Run()
 }

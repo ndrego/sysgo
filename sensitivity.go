@@ -6,7 +6,7 @@ import (
 
 type SensitivityQualifier int
 
-type SensitivitySimFunc func() error
+type SensitivitySimFunc func(*SimChanPair) (bool, error)
 
 const (
 	None SensitivityQualifier = iota
