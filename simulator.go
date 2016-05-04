@@ -3,7 +3,7 @@ package sysgo
 import (
 	"fmt"
 	"math"
-	"math/rand"
+	_ "math/rand"
 	"sync"
 )
 
@@ -31,10 +31,17 @@ const (
 	allChanTypes = 0xffffffff
 )
 
+type eventCounts struct {
+	module uint32
+	initializer uint32
+	sensitivity uint32
+}
+
 type SimChanPair struct {
 	send chan simInternalEvent // Send from module/initializer/etc. to simulator
 	recv chan simInternalEvent // Receive by module/initializer/etc.
 	chanType simChanType
+	valid bool
 	data interface{}
 	dataMutex sync.Mutex
 }
@@ -48,9 +55,11 @@ type Simulator struct {
 	simTimeMutex sync.Mutex
 	
 	// Internal simulator event channels
-	simChans map[int64]*SimChanPair
+	simChans []*SimChanPair
 	simChansMutex sync.Mutex
 	simChanCounts map[simChanType]uint
+
+	eventCounts map[simInternalEvent]uint
 
 	runnersWG *sync.WaitGroup
 	
@@ -73,12 +82,14 @@ func (A *Simulator) Initialize(timescale, precision float64) {
 	A.timescale = timescale
 	A.precision = precision
 	A.modules = make([]*Module, 0, 10)
-	A.simChans = make(map[int64]*SimChanPair)
+	A.simChans = make([]*SimChanPair, 0, 10)
 	A.simChanCounts = make(map[simChanType]uint)
 
 	A.simChanCounts[module] = uint(0)
 	A.simChanCounts[initializer] = uint(0)
 	A.simChanCounts[sensitivity] = uint(0)
+
+	A.eventCounts = make(map[simInternalEvent]uint)
 }
 
 // This should only be called once per *TOP-LEVEL* module
@@ -91,22 +102,23 @@ func (A *Simulator) RegisterModule(m *Module) {
 	A.numSenseClauses += s
 }
 
-func (A *Simulator) RegisterChannelPair(cp *SimChanPair) (chanId int64) {
-	chanId = rand.Int63()
+func (A *Simulator) RegisterChannelPair(cp *SimChanPair) (chanId int) {
+	chanId = len(A.simChans)
 	A.simChansMutex.Lock()
 	defer A.simChansMutex.Unlock()
-	
-	A.simChans[chanId] = cp
+
+	A.simChans = append(A.simChans, cp)
+	A.simChans[chanId].valid = true
 	A.simChanCounts[cp.chanType]++
 	return chanId
 }
 
-func (A *Simulator) UnregisterChannelPair(chanId int64) {
+func (A *Simulator) UnregisterChannelPair(chanId int) {
 	A.simChansMutex.Lock()
 	defer A.simChansMutex.Unlock()
 	
 	A.simChanCounts[A.simChans[chanId].chanType]--
-	delete(A.simChans, chanId)
+	A.simChans[chanId].valid = false
 }
 
 func (A *Simulator) Run() {
@@ -141,11 +153,11 @@ func (A *Simulator) Run() {
 		// Wait for a timestep complete from at least the remaining initializers and
 		// all sensitivity clauses
 		// fmt.Printf("Waiting for %d channels...\n", expEventCount)		
-		m := A.waitForChannels(allChanTypes, blockProgress | blockWait | blockComplete | delayWait | simFinish, expEventCount)
+		A.waitForChannels(allChanTypes, blockProgress | blockWait | blockComplete | delayWait | simFinish, expEventCount)
 
-		finish = getEventCounts(simFinish, m) > 0
-		delayCount := getEventCounts(delayWait, m)
-		blockWaitCount := getEventCounts(blockWait, m)
+		finish = A.getEventCounts(simFinish) > 0
+		delayCount := A.getEventCounts(delayWait)
+		blockWaitCount := A.getEventCounts(blockWait)
 
 		A.sendToChannels(module, updateRegisters, true)
 		A.waitForChannels(module, registerUpdateComplete, A.simChanCounts[module])
@@ -158,16 +170,18 @@ func (A *Simulator) Run() {
 			// Find the minimum target time and fast-forward
 			min := uint64(0xffffffffffffffff)
 			for _, cp := range A.simChans {
-				cp.dataMutex.Lock()
-				switch d := cp.data.(type) {
-				case nil:
-				case uint64:
-					tt := d
-					if tt > 0 && tt < min {
-						min = tt
+				if cp.valid {
+					cp.dataMutex.Lock()
+					switch d := cp.data.(type) {
+					case nil:
+					case uint64:
+						tt := d
+						if tt > 0 && tt < min {
+							min = tt
+						}
 					}
+					cp.dataMutex.Unlock()
 				}
-				cp.dataMutex.Unlock()
 			}
 			// fmt.Printf("Fast-forwarding to %d\n", min)
 			A.simTimeMutex.Lock()
@@ -183,10 +197,16 @@ func (A *Simulator) Run() {
 	A.runnersWG.Wait()
 }
 
-func getEventCounts(e simInternalEvent, m map[simInternalEvent]uint) (n uint) {
+func (A *Simulator) initEventCounts() {
+	for i := blockRun; i <= simFinish; i = i << 1 {
+		A.eventCounts[i] = 0
+	}
+}
+
+func (A *Simulator) getEventCounts(e simInternalEvent) (n uint) {
 	n = 0
-	if _, ok := m[e]; ok {
-		n = m[e]
+	if _, ok := A.eventCounts[e]; ok {
+		n = A.eventCounts[e]
 	}
 	return
 }
@@ -219,7 +239,7 @@ func (A *Simulator) sendToChannels(chanMask simChanType, e simInternalEvent, blo
 	A.simChansMutex.Lock()
 	defer A.simChansMutex.Unlock()
 	for _, cp := range A.simChans {
-		if cp.chanType & chanMask > 0 {
+		if cp.valid && (cp.chanType & chanMask > 0) {
 			// fmt.Printf("Sending %d to 0x%x\n", e, pairId)
 			if blocking {
 				cp.recv <- e
@@ -235,23 +255,19 @@ func (A *Simulator) sendToChannels(chanMask simChanType, e simInternalEvent, blo
 	return
 }
 
-func (A *Simulator) waitForChannels(chanMask simChanType, eventMask simInternalEvent, minCount uint) map[simInternalEvent]uint {
-	m := make(map[simInternalEvent]uint)
+func (A *Simulator) waitForChannels(chanMask simChanType, eventMask simInternalEvent, minCount uint) {
+	A.initEventCounts()
 	n := uint(0)
 	for {
 		A.simChansMutex.Lock()
 		for _, cp := range A.simChans {
-			if cp.chanType & chanMask > 0 {
+			if cp.valid && cp.chanType & chanMask > 0 {
 				// Non-blocking read
 				select {
 				case e := <- cp.send:
 					// fmt.Printf("Got event %d on chan 0x%x\n", e, pairId)
 					if e & eventMask > 0 {
-						if _, ok := m[e]; ok {
-							m[e]++
-						} else {
-							m[e] = 1
-						}
+						A.eventCounts[e]++
 						switch e {
 						case blockComplete:
 							close(cp.recv)
@@ -270,8 +286,6 @@ func (A *Simulator) waitForChannels(chanMask simChanType, eventMask simInternalE
 			break
 		}
 	}
-
-	return m
 }
 
 func waitForEvents(c chan simInternalEvent, eventMask simInternalEvent) simInternalEvent {
