@@ -1,8 +1,12 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"github.com/ndrego/sysgo"
+	"log"
+	"os"
+	"runtime/pprof"
 )
 
 type ToggleModule struct {
@@ -44,6 +48,18 @@ func NewToggleModule() (tm *ToggleModule) {
 }
 
 func main() {
+	var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
+
+	flag.Parse()
+	if *cpuprofile != "" {
+		f, err := os.Create(*cpuprofile)
+		if err != nil {
+			log.Fatal(err)
+		}
+		pprof.StartCPUProfile(f)
+		defer pprof.StopCPUProfile()
+	}
+	
 	tm := NewToggleModule()
 	sim := sysgo.GetSimulator()
 	sim.Initialize(1e-9, 1e-9)
