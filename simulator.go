@@ -37,13 +37,46 @@ type eventCounts struct {
 	sensitivity uint32
 }
 
+type simEventAndId struct {
+	e simInternalEvent
+	id int
+}
+
 type SimChanPair struct {
-	send chan simInternalEvent // Send from module/initializer/etc. to simulator
+	send chan simEventAndId // Send from module/initializer/etc. to simulator
 	recv chan simInternalEvent // Receive by module/initializer/etc.
+	id int
 	chanType simChanType
 	valid bool
 	data interface{}
 	dataMutex sync.Mutex
+}
+
+// Blocking send to simulator
+func (A *SimChanPair) Send(e simInternalEvent) {
+	A.send <- simEventAndId{e: e, id: A.id}
+}
+
+// Non-blocking send to simulator
+func (A *SimChanPair) SendNB(e simInternalEvent) {
+	select {
+	case A.send <- simEventAndId{e: e, id: A.id}:
+	default:
+	}
+}
+
+func (A *SimChanPair) Recv(eventMask simInternalEvent) simInternalEvent {
+	for {
+		event, ok := <- A.recv
+		if !ok {
+			close(A.recv)
+			return simFinish
+		} else {
+			if event & eventMask > 0 {
+				return event
+			}
+		}
+	}
 }
 
 type Simulator struct {
@@ -55,6 +88,7 @@ type Simulator struct {
 	simTimeMutex sync.Mutex
 	
 	// Internal simulator event channels
+	simRecvChan chan simEventAndId
 	simChans []*SimChanPair
 	simChansMutex sync.Mutex
 	simChanCounts map[simChanType]uint
@@ -82,6 +116,7 @@ func (A *Simulator) Initialize(timescale, precision float64) {
 	A.timescale = timescale
 	A.precision = precision
 	A.modules = make([]*Module, 0, 10)
+	A.simRecvChan = make(chan simEventAndId)
 	A.simChans = make([]*SimChanPair, 0, 10)
 	A.simChanCounts = make(map[simChanType]uint)
 
@@ -102,15 +137,15 @@ func (A *Simulator) RegisterModule(m *Module) {
 	A.numSenseClauses += s
 }
 
-func (A *Simulator) RegisterChannelPair(cp *SimChanPair) (chanId int) {
-	chanId = len(A.simChans)
+func (A *Simulator) RegisterChannelPair(cp *SimChanPair) {
+	cp.id = len(A.simChans)
+	cp.send = A.simRecvChan
 	A.simChansMutex.Lock()
 	defer A.simChansMutex.Unlock()
 
 	A.simChans = append(A.simChans, cp)
-	A.simChans[chanId].valid = true
+	A.simChans[cp.id].valid = true
 	A.simChanCounts[cp.chanType]++
-	return chanId
 }
 
 func (A *Simulator) UnregisterChannelPair(chanId int) {
@@ -118,7 +153,10 @@ func (A *Simulator) UnregisterChannelPair(chanId int) {
 	defer A.simChansMutex.Unlock()
 	
 	A.simChanCounts[A.simChans[chanId].chanType]--
+	A.simChans[chanId].send = nil
 	A.simChans[chanId].valid = false
+	A.simChans[chanId].id = -1
+	close(A.simChans[chanId].recv)
 }
 
 func (A *Simulator) Run() {
@@ -144,7 +182,7 @@ func (A *Simulator) Run() {
 		
 	// Main event coordination loop
 	for finish := false; !finish; {
-		A.sendToChannels(initializer | sensitivity, blockRun, false)
+		A.sendEvent(initializer | sensitivity, blockRun, false)
 
 		// May need a mutex on simChanCounts
 		expEventCount := A.simChanCounts[initializer] + A.simChanCounts[sensitivity]
@@ -153,17 +191,17 @@ func (A *Simulator) Run() {
 		// Wait for a timestep complete from at least the remaining initializers and
 		// all sensitivity clauses
 		// fmt.Printf("Waiting for %d channels...\n", expEventCount)		
-		A.waitForChannels(allChanTypes, blockProgress | blockWait | blockComplete | delayWait | simFinish, expEventCount)
+		A.waitForResponses(initializer | sensitivity, blockProgress | blockWait | blockComplete | delayWait | simFinish, expEventCount)
 
 		finish = A.getEventCounts(simFinish) > 0
 		delayCount := A.getEventCounts(delayWait)
 		blockWaitCount := A.getEventCounts(blockWait)
 
-		A.sendToChannels(module, updateRegisters, true)
-		A.waitForChannels(module, registerUpdateComplete, A.simChanCounts[module])
+		A.sendEvent(module, updateRegisters, true)
+		A.waitForResponses(module, registerUpdateComplete, A.simChanCounts[module])
 
-		A.sendToChannels(module, propagateWireValues, true)
-		A.waitForChannels(module, wirePropagateComplete, A.simChanCounts[module])
+		A.sendEvent(module, propagateWireValues, true)
+		A.waitForResponses(module, wirePropagateComplete, A.simChanCounts[module])
 
 		// Increment simTime if everything is just waiting
 		if (delayCount + blockWaitCount) == expEventCount {
@@ -192,7 +230,7 @@ func (A *Simulator) Run() {
 
 	fmt.Printf("Simulator: out of main event loop.\n")
 
-	A.sendToChannels(allChanTypes, simFinish, true)
+	A.sendEvent(allChanTypes, simFinish, true)
 	
 	A.runnersWG.Wait()
 }
@@ -227,15 +265,15 @@ func (A *Simulator) spawnRunners(blockReadyWG *sync.WaitGroup) {
 
 func newSimChannelPair(t simChanType) (cp *SimChanPair) {
 	cp = new(SimChanPair)
-	cp.send = make(chan simInternalEvent, 1)
+	cp.send = nil
 	cp.recv = make(chan simInternalEvent, 1)
 	cp.chanType = t
 
 	return
 }
 
-func (A *Simulator) sendToChannels(chanMask simChanType, e simInternalEvent, blocking bool) (c uint) {
-	c = 0
+func (A *Simulator) sendEvent(chanMask simChanType, e simInternalEvent, blocking bool) (c []int) {
+	c = make([]int, 2)
 	A.simChansMutex.Lock()
 	defer A.simChansMutex.Unlock()
 	for _, cp := range A.simChans {
@@ -249,55 +287,26 @@ func (A *Simulator) sendToChannels(chanMask simChanType, e simInternalEvent, blo
 				default:
 				}
 			}
-			c++
+			c = append(c, cp.id)
 		}
 	}
 	return
 }
 
-func (A *Simulator) waitForChannels(chanMask simChanType, eventMask simInternalEvent, minCount uint) {
+func (A *Simulator) waitForResponses(chanMask simChanType, eventMask simInternalEvent, minCount uint) {
 	A.initEventCounts()
 	n := uint(0)
-	for {
+	for e := range A.simRecvChan {
 		A.simChansMutex.Lock()
-		for _, cp := range A.simChans {
-			if cp.valid && cp.chanType & chanMask > 0 {
-				// Non-blocking read
-				select {
-				case e := <- cp.send:
-					// fmt.Printf("Got event %d on chan 0x%x\n", e, pairId)
-					if e & eventMask > 0 {
-						A.eventCounts[e]++
-						switch e {
-						case blockComplete:
-							close(cp.recv)
-						}
-						n++
-						//fmt.Printf("Got %d/%d events\n", n, minCount)
-					}
-				default:
-					break
-				}
-			}
-			
+		cp := A.simChans[e.id]
+		if (cp.chanType & chanMask > 0) && (e.e & eventMask > 0) {
+			A.eventCounts[e.e]++
+			n++
 		}
 		A.simChansMutex.Unlock()
+
 		if n >= minCount {
 			break
-		}
-	}
-}
-
-func waitForEvents(c chan simInternalEvent, eventMask simInternalEvent) simInternalEvent {
-	for {
-		event, ok := <- c
-		if !ok {
-			close(c)
-			return simFinish
-		} else {
-			if event & eventMask > 0 {
-				return event
-			}
 		}
 	}
 }
@@ -327,11 +336,11 @@ func Delay(cp *SimChanPair, d float64) bool {
 	cp.dataMutex.Lock()
 	cp.data = targetTime
 	cp.dataMutex.Unlock()
-	cp.send <- delayWait
+	cp.Send(delayWait)
 
 	// Now wait until the correct timestep
 	for {
-		e := waitForEvents(cp.recv, blockRun | simFinish)
+		e := cp.Recv(blockRun | simFinish)
 		switch e {
 		case simFinish:
 			return false
@@ -344,10 +353,7 @@ func Delay(cp *SimChanPair, d float64) bool {
 				cp.dataMutex.Unlock()
 				return true
 			} else {
-				select {
-				case cp.send <- delayWait:
-				default:
-				}
+				cp.SendNB(delayWait)
 			}
 			sim.simTimeMutex.Unlock()
 		}

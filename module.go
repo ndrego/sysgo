@@ -45,8 +45,8 @@ func (A *Module) run(wg, blockReadyWG *sync.WaitGroup) {
 	
 	A.sim = GetSimulator()
 	cp := newSimChannelPair(module)
-	pairId := A.sim.RegisterChannelPair(cp)
-	defer A.sim.UnregisterChannelPair(pairId)
+	A.sim.RegisterChannelPair(cp)
+	defer A.sim.UnregisterChannelPair(cp.id)
 
 	modWG := new(sync.WaitGroup)
 	modWG.Add(len(A.Initializers) + len(A.SensitivityClauses) + len(A.SubModules))
@@ -65,20 +65,14 @@ func (A *Module) run(wg, blockReadyWG *sync.WaitGroup) {
 
 EventLoop:
 	for {
-		e := waitForEvents(cp.recv, updateRegisters | propagateWireValues | simFinish)
+		e := cp.Recv(updateRegisters | propagateWireValues | simFinish)
 		switch e {
 		case updateRegisters:
 			A.updateRegisters()
-			select {
-			case cp.send <- registerUpdateComplete:
-			default:
-			}
+			cp.SendNB(registerUpdateComplete)
 		case propagateWireValues:
 			A.propagateWires()
-			select {
-			case cp.send <- wirePropagateComplete:
-			default:
-			}
+			cp.SendNB(wirePropagateComplete)
 		case simFinish:
 			break EventLoop
 		}
@@ -91,12 +85,12 @@ func (A *Module) runInitializer(i int, modWG, blockReadyWG *sync.WaitGroup) {
 	defer modWG.Done()
 
 	cp := newSimChannelPair(initializer)
-	pairId := A.sim.RegisterChannelPair(cp)
-	defer A.sim.UnregisterChannelPair(pairId)
+	A.sim.RegisterChannelPair(cp)
+	defer A.sim.UnregisterChannelPair(cp.id)
 
 	blockReadyWG.Done()
 
-	waitForEvents(cp.recv, blockRun)
+	cp.Recv(blockRun)
 	finish, err := A.Initializers[i](cp)
 
 	var event simInternalEvent
@@ -112,19 +106,15 @@ func (A *Module) runInitializer(i int, modWG, blockReadyWG *sync.WaitGroup) {
 	// Blocking send, so that we don't
 	// unregister the channel before the message
 	// is actually read.
-	cp.send <- event
-	_, more := <- cp.recv
-	if !more {
-		close(cp.send)
-	}
+	cp.Send(event)
 }
 
 func (A *Module) runSensitivityClause(i int, modWG, blockReadyWG *sync.WaitGroup) {
 	defer modWG.Done()
 
 	cp := newSimChannelPair(sensitivity)
-	pairId := A.sim.RegisterChannelPair(cp)
-	defer A.sim.UnregisterChannelPair(pairId)
+	A.sim.RegisterChannelPair(cp)
+	defer A.sim.UnregisterChannelPair(cp.id)
 
 	sc := A.SensitivityClauses[i]
 
@@ -141,18 +131,20 @@ EventLoop:
 			case simFinish:
 				break EventLoop
 			case blockRun:
+				var ev simInternalEvent
 				if A.evalSensitivity(sc.s) {
 					finish, error := sc.sf(cp)
 					if finish {
-						cp.send <- simFinish
+						ev = simFinish
 					} else if error != nil {
-						cp.send <- blockError
+						ev = blockError
 					} else {
-						cp.send <- blockProgress
+						ev = blockProgress
 					}
 				} else {
-					cp.send <- blockWait
+					ev = blockWait
 				}
+				cp.Send(ev)
 			}
 		}
 	}
