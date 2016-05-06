@@ -182,26 +182,21 @@ func (A *Simulator) Run() {
 		
 	// Main event coordination loop
 	for finish := false; !finish; {
-		A.sendEvent(initializer | sensitivity, blockRun, false)
-
 		// May need a mutex on simChanCounts
 		expEventCount := A.simChanCounts[initializer] + A.simChanCounts[sensitivity]
-		// fmt.Printf("simTime: %d, expEventCount: %d\n", A.simTime, expEventCount)
 
-		// Wait for a timestep complete from at least the remaining initializers and
-		// all sensitivity clauses
-		// fmt.Printf("Waiting for %d channels...\n", expEventCount)		
-		A.waitForResponses(initializer | sensitivity, blockProgress | blockWait | blockComplete | delayWait | simFinish, expEventCount)
+		chanIds := A.sendEvent(initializer | sensitivity, blockRun, false)
+		A.waitForResponses(chanIds, blockProgress | blockWait | blockComplete | delayWait | simFinish, expEventCount)
 
 		finish = A.getEventCounts(simFinish) > 0
 		delayCount := A.getEventCounts(delayWait)
 		blockWaitCount := A.getEventCounts(blockWait)
 
-		A.sendEvent(module, updateRegisters, true)
-		A.waitForResponses(module, registerUpdateComplete, A.simChanCounts[module])
+		chanIds = A.sendEvent(module, updateRegisters, true)
+		A.waitForResponses(chanIds, registerUpdateComplete, A.simChanCounts[module])
 
-		A.sendEvent(module, propagateWireValues, true)
-		A.waitForResponses(module, wirePropagateComplete, A.simChanCounts[module])
+		chanIds = A.sendEvent(module, propagateWireValues, true)
+		A.waitForResponses(chanIds, wirePropagateComplete, A.simChanCounts[module])
 
 		// Increment simTime if everything is just waiting
 		if (delayCount + blockWaitCount) == expEventCount {
@@ -273,7 +268,7 @@ func newSimChannelPair(t simChanType) (cp *SimChanPair) {
 }
 
 func (A *Simulator) sendEvent(chanMask simChanType, e simInternalEvent, blocking bool) (c []int) {
-	c = make([]int, 2)
+	c = make([]int, 0, 2)
 	A.simChansMutex.Lock()
 	defer A.simChansMutex.Unlock()
 	for _, cp := range A.simChans {
@@ -293,20 +288,24 @@ func (A *Simulator) sendEvent(chanMask simChanType, e simInternalEvent, blocking
 	return
 }
 
-func (A *Simulator) waitForResponses(chanMask simChanType, eventMask simInternalEvent, minCount uint) {
+func (A *Simulator) waitForResponses(chanIds []int, eventMask simInternalEvent, minCount uint) {
 	A.initEventCounts()
-	n := uint(0)
 	for e := range A.simRecvChan {
-		A.simChansMutex.Lock()
-		cp := A.simChans[e.id]
-		if (cp.chanType & chanMask > 0) && (e.e & eventMask > 0) {
-			A.eventCounts[e.e]++
-			n++
+		in := -1
+		for i, id := range chanIds {
+			if e.id == id {
+				in = i
+				break
+			}
 		}
-		A.simChansMutex.Unlock()
 
-		if n >= minCount {
-			break
+		if (in >= 0) && (e.e & eventMask > 0) {
+			A.eventCounts[e.e]++
+			chanIds = append(chanIds[:in], chanIds[in+1:]...)
+
+			if len(chanIds) == 0 {
+				break
+			}
 		}
 	}
 }
