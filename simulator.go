@@ -7,6 +7,9 @@ import (
 	"sync"
 )
 
+//go:generate stringer -type simInternalEvent
+//go:generate stringer -type simChanType 
+
 type simInternalEvent uint32
 const (
 	blockRun simInternalEvent = 1 << iota
