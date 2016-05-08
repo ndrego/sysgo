@@ -69,10 +69,10 @@ EventLoop:
 		switch e {
 		case updateRegisters:
 			A.updateRegisters()
-			cp.SendNB(registerUpdateComplete)
+			cp.Send(registerUpdateComplete)
 		case propagateWireValues:
 			A.propagateWires()
-			cp.SendNB(wirePropagateComplete)
+			cp.Send(wirePropagateComplete)
 		case simFinish:
 			break EventLoop
 		}

@@ -188,7 +188,7 @@ func (A *Simulator) Run() {
 		// May need a mutex on simChanCounts
 		expEventCount := A.simChanCounts[initializer] + A.simChanCounts[sensitivity]
 
-		chanIds := A.sendEvent(initializer | sensitivity, blockRun, false)
+		chanIds := A.sendEvent(initializer | sensitivity, blockRun, true)
 		A.waitForResponses(chanIds, blockProgress | blockWait | blockComplete | delayWait | simFinish, expEventCount)
 
 		finish = A.getEventCounts(simFinish) > 0
@@ -276,7 +276,6 @@ func (A *Simulator) sendEvent(chanMask simChanType, e simInternalEvent, blocking
 	defer A.simChansMutex.Unlock()
 	for _, cp := range A.simChans {
 		if cp.valid && (cp.chanType & chanMask > 0) {
-			// fmt.Printf("Sending %d to 0x%x\n", e, pairId)
 			if blocking {
 				cp.recv <- e
 			} else {
@@ -305,7 +304,6 @@ func (A *Simulator) waitForResponses(chanIds []int, eventMask simInternalEvent, 
 		if (in >= 0) && (e.e & eventMask > 0) {
 			A.eventCounts[e.e]++
 			chanIds = append(chanIds[:in], chanIds[in+1:]...)
-
 			if len(chanIds) == 0 {
 				break
 			}
@@ -355,7 +353,7 @@ func Delay(cp *SimChanPair, d float64) bool {
 				cp.dataMutex.Unlock()
 				return true
 			} else {
-				cp.SendNB(delayWait)
+				cp.Send(delayWait)
 			}
 			sim.simTimeMutex.Unlock()
 		}
