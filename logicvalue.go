@@ -3,19 +3,19 @@ package sysgo
 import (
 )
 
-//go:generate stringer -type Value
+//go:generate stringer -type LogicValue
 
-type Value uint8
+type LogicValue uint8
 
 const (
-	Lo Value = iota
+	Lo LogicValue = iota
 	Hi
 	HiZ
 	Undefined
 )
 
 
-func CombineValue(cur, next Value) Value {
+func CombineLogicValue(cur, next LogicValue) LogicValue {
 	if cur == next {
 		return cur
 	} else if cur == Undefined || next == Undefined {
@@ -29,7 +29,16 @@ func CombineValue(cur, next Value) Value {
 	return Undefined
 }
 
-func (A Value) Invert() Value {
+func (A LogicValue) UnaryOp(op rune) LogicValue {
+	switch op {
+	case '~':
+		return A.Invert()
+	default:
+		return A
+	}
+}
+
+func (A LogicValue) Invert() LogicValue {
 	switch {
 	case A == Lo:
 		return Hi

@@ -31,7 +31,7 @@ func NewToggleModule() (tm *ToggleModule) {
 		}
 
 		fmt.Printf("clk toggle @ %d: %s\n", sysgo.SimTime(), clk.GetValue())
-		clk.SetValue(clk.GetValue().Invert())
+		clk.SetValue(clk.GetValue().UnaryOp('~'))
 
 		return false, nil
 	}

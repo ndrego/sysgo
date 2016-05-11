@@ -7,16 +7,16 @@ type Wire struct {
 	Name string
 	drivers []DriverInterface
 	receivers []ReceiverInterface
-	currentValue Value
-	lastValue Value
+	currentValue LogicValue
+	lastValue LogicValue
 }
 
 func (A *Wire) computeValue() {
-	var v Value
+	var v LogicValue
 	if len(A.drivers) > 0 {
 		v = A.drivers[0].GetValue()
 		for i := 1; i < len(A.drivers); i++ {
-			v = CombineValue(v, A.drivers[i].GetValue())
+			v = CombineLogicValue(v, A.drivers[i].GetValue())
 		}
 	} else {
 		v = Undefined
@@ -33,10 +33,10 @@ func (A *Wire) propagate() {
 	}
 }
 
-func (A *Wire) GetValue() Value {
+func (A *Wire) GetValue() LogicValue {
 	return A.currentValue
 }
 
-func (A *Wire) GetLastValue() Value {
+func (A *Wire) GetLastValue() LogicValue {
 	return A.lastValue
 }

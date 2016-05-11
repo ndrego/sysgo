@@ -9,10 +9,10 @@ type Port struct {
 	receiver ReceiverInterface
 }
 
-func (A *Port) GetValue() Value {
+func (A *Port) GetValue() LogicValue {
 	return A.driver.GetValue()
 }
 
-func (A *Port) GetLastValue() Value {
+func (A *Port) GetLastValue() LogicValue {
 	return A.driver.GetLastValue()
 }
