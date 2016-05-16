@@ -29,21 +29,18 @@ func CombineLogicValue(cur, next LogicValue) LogicValue {
 	return Undefined
 }
 
-func (A LogicValue) UnaryOp(op rune) LogicValue {
+func (X LogicValue) Unary(op rune) LogicValue {
 	switch op {
 	case '~':
-		return A.Invert()
+		switch X {
+		case Lo:
+			return Hi
+		case Hi:
+			return Lo
+		default:
+			return X
+		}
 	default:
-		return A
+		return X
 	}
-}
-
-func (A LogicValue) Invert() LogicValue {
-	switch {
-	case A == Lo:
-		return Hi
-	case A == Hi:
-		return Lo
-	}
-	return A
 }
