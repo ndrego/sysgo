@@ -7,6 +7,24 @@ import (
 	"math/big"
 )
 
+var ParityTable256 = [...]int{
+	0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0,
+	1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 1,
+	1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 1,
+	0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0,
+	1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 1,
+	0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0,
+	0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0,
+	1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 1,
+	1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 1,
+	0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0,
+	0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0,
+	1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 1,
+	0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0,
+	1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 1,
+	1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 1,
+	0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0}
+
 type mbv64 struct {
 	numBits uint
 	bits uint64
@@ -179,6 +197,40 @@ func (X *mbv64) unary(op string) MultiBitValue {
 			}
 		}
 		return Z
+	case "^", "~^":
+		Z := NewMultiBitValue(1)
+		if X.hiz & mask != 0 || X.undef & mask != 0 {
+			Z.setBit(0, Undefined)
+		} else {
+			// XOR each byte and then look up the resultant
+			// value in the parity look up table
+			numBytes := X.numBits / 8
+			extraBits := X.numBits % 8
+
+			var v, m uint8
+			start := int(numBytes) - 1
+			if extraBits == 0 {
+				m = uint8(0xff)
+			} else {
+				start += 1
+				m = uint8(1 << extraBits - 1)
+			}
+			for i := start; i >= 0; i-- {
+				s := uint8(i * 8)
+				if i == start {
+					v = uint8(X.bits >> s) & m
+				} else {
+					v ^= uint8((X.bits >> s) & 0xff)
+				}
+			}
+			Z.setBit(0, LogicValue(uint8(ParityTable256[v])))
+
+			if op == "~^" {
+				Z.setBit(0, Z.getBit(0).Unary('~'))
+			}
+		}
+		return Z
+		
 	default:
 		return X
 	}
@@ -224,6 +276,37 @@ func (X *mbvBig) unary(op string) MultiBitValue {
 			}
 		}
 		return Z
+	case "^", "~^":
+		Z := NewMultiBitValue(1)
+		if X.hiz.Cmp(&zero) != 0 || X.undef.Cmp(&zero) != 0 {
+			Z.setBit(0, Undefined)
+		} else {
+			// XOR each byte and then look up the resultant
+			// value in the parity look up table
+			extraBits := X.numBits % 8
+			var v, m uint8
+			if extraBits == 0 {
+				m = uint8(0xff)
+			} else {
+				m = uint8(1 << extraBits - 1)
+			}
+
+			b := X.bits.Bytes()
+			for i, by := range b {
+				if i == 0 {
+					v = uint8(by & m)
+				} else {
+					v ^= uint8(by)
+				}
+			}
+			Z.setBit(0, LogicValue(uint8(ParityTable256[v])))
+
+			if op == "~^" {
+				Z.setBit(0, Z.getBit(0).Unary('~'))
+			}
+		}
+		return Z
+
 	default:
 		return X
 	}

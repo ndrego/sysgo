@@ -1,7 +1,7 @@
 package sysgo
 
 import (
-	_ "fmt"
+	"fmt"
 	"github.com/stretchr/testify/assert"
 	_ "math"
 	_ "reflect"
@@ -50,7 +50,7 @@ func TestMBVGetSetBit(t *testing.T) {
 
 func TestMBVUnaryOps(t *testing.T) {
 	var mbv MultiBitValue
-	sizes := []uint{61, 247}
+	sizes := []uint{48, 61, 212, 247}
 
 	for _, size := range sizes {
 		mbv = NewMultiBitValue(size)
@@ -64,6 +64,7 @@ func TestMBVUnaryOps(t *testing.T) {
 			assert.Equal(t, true, ok, "Wrong kind")
 		}
 
+		fmt.Printf("size = %d\n", size)
 		mbv.setBit(size - 2, Hi)
 		inv := mbv.unary("~")
 
@@ -81,6 +82,15 @@ func TestMBVUnaryOps(t *testing.T) {
 		assert.Equal(t, uint(1), and.bitLen(), "and has more than 1 bit")
 		assert.Equal(t, Lo, and.getBit(0), "Bit 0 should be Lo")
 
+		oddParity := mbv.unary("^")
+		assert.Equal(t, uint(1), oddParity.bitLen(), "parity has more than 1 bit")
+		assert.Equal(t, Hi, oddParity.getBit(0), fmt.Sprintf("Bit 0 should be Hi, size = %d", size))
+		
+		evenParity := mbv.unary("~^")
+		assert.Equal(t, uint(1), evenParity.bitLen(), "parity has more than 1 bit")
+		assert.Equal(t, Lo, evenParity.getBit(0), fmt.Sprintf("Bit 0 should be Lo, size = %d", size))
+
+		
 		for i := uint(0); i < mbv.bitLen(); i++ {
 			mbv.setBit(i, Hi)
 		}
@@ -91,6 +101,21 @@ func TestMBVUnaryOps(t *testing.T) {
 		nand := mbv.unary("~&")
 		assert.Equal(t, uint(1), nand.bitLen(), "nand has more than 1 bit")
 		assert.Equal(t, Lo, nand.getBit(0), "Bit 0 should be Lo")
+
+		exp := Lo
+		notExp := Hi
+		if size % 2 != 0 {
+			exp = Hi
+			notExp = Lo
+		}
+		oddParity = mbv.unary("^")
+		assert.Equal(t, uint(1), oddParity.bitLen(), "parity has more than 1 bit")
+		assert.Equal(t, exp, oddParity.getBit(0), "Bit 0 should be Lo")
+		
+		evenParity = mbv.unary("~^")
+		assert.Equal(t, uint(1), evenParity.bitLen(), "parity has more than 1 bit")
+		assert.Equal(t, notExp, evenParity.getBit(0), "Bit 0 should be Hi")
+
 	}
 
 }
