@@ -6,9 +6,9 @@ import (
 
 type Register struct {
 	Name string
-	currentValue LogicValue
-	nextValue LogicValue
-	lastValue LogicValue
+	currentValue LogicState
+	nextValue LogicState
+	lastValue LogicState
 	modified bool
 }
 
@@ -21,7 +21,7 @@ func (A *Register) updateValue() {
 
 }
 
-func (A *Register) SetValue(v LogicValue) error {
+func (A *Register) SetValue(v LogicState) error {
 	if A.modified {
 		return fmt.Errorf("Setting register %s multiple times in same event.", A.Name)
 	}
@@ -32,11 +32,11 @@ func (A *Register) SetValue(v LogicValue) error {
 	return nil
 }
 
-func (A *Register) GetValue() LogicValue {
+func (A *Register) GetValue() LogicState {
 	return A.currentValue
 }
 
-func (A *Register) GetLastValue() LogicValue {
+func (A *Register) GetLastValue() LogicState {
 	return A.lastValue
 }
 

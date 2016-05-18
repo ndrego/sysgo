@@ -46,10 +46,10 @@ type mbvBig struct {
 
 type MultiBitValue interface {
 	bitLen() uint
-	getBit(uint) (LogicValue, error)
+	getBit(uint) (LogicState, error)
 	getBits([]uint) (MultiBitValue, error)
 	getBitRange(low, high uint) (MultiBitValue, error)
-	setBit(uint, LogicValue) error
+	setBit(uint, LogicState) error
 	setBitRange(uint, uint, MultiBitValue) error
 	unary(string) MultiBitValue
 	binary(string, MultiBitValue) MultiBitValue
@@ -82,7 +82,7 @@ func (X *mbvBig) bitLen() uint {
 	return X.numBits
 }
 
-func (X *mbv64) getBit(b uint) (LogicValue, error) {
+func (X *mbv64) getBit(b uint) (LogicState, error) {
 	if b > (X.numBits - 1) {
 		return Undefined, fmt.Errorf("Index (%d) out of bounds.\n", b)
 	}
@@ -94,11 +94,11 @@ func (X *mbv64) getBit(b uint) (LogicValue, error) {
 	} else if X.hiz & mask > 0 {
 		return HiZ, nil
 	} else {
-		return LogicValue((X.bits >> b) & 0x1), nil
+		return LogicState((X.bits >> b) & 0x1), nil
 	}
 }
 
-func (X *mbvBig) getBit(b uint) (LogicValue, error) {
+func (X *mbvBig) getBit(b uint) (LogicState, error) {
 	if b > (X.numBits - 1) {
 		return Undefined, fmt.Errorf("Index (%d) out of bounds.\n", b)
 	}
@@ -108,7 +108,7 @@ func (X *mbvBig) getBit(b uint) (LogicValue, error) {
 	} else if X.hiz.Bit(int(b)) == 1 {
 		return HiZ, nil
 	} else {
-		return LogicValue(X.bits.Bit(int(b))), nil
+		return LogicState(X.bits.Bit(int(b))), nil
 	}
 }
 
@@ -195,7 +195,7 @@ func (X *mbvBig) getBitRange(low, high uint) (MultiBitValue, error) {
 	}
 }
 
-func (X *mbv64) setBit(b uint, v LogicValue) error {
+func (X *mbv64) setBit(b uint, v LogicState) error {
 	if b > (X.numBits - 1) {
 		return fmt.Errorf("Index (%d) out of bounds.\n", b)
 	}
@@ -223,7 +223,7 @@ func (X *mbv64) setBit(b uint, v LogicValue) error {
 	return nil
 }
 
-func (X *mbvBig) setBit(b uint, v LogicValue) error {
+func (X *mbvBig) setBit(b uint, v LogicState) error {
 	if b > (X.numBits - 1) {
 		return fmt.Errorf("Index (%d) out of bounds.\n", b)
 	}
@@ -409,7 +409,7 @@ func (X *mbv64) unary(op string) MultiBitValue {
 					v ^= uint8((X.bits >> s) & 0xff)
 				}
 			}
-			Z.setBit(0, LogicValue(uint8(ParityTable256[v])))
+			Z.setBit(0, LogicState(uint8(ParityTable256[v])))
 
 			if op == "~^" {
 				b, _ := Z.getBit(0)
@@ -492,7 +492,7 @@ func (X *mbvBig) unary(op string) MultiBitValue {
 					v ^= uint8(by)
 				}
 			}
-			Z.setBit(0, LogicValue(uint8(ParityTable256[v])))
+			Z.setBit(0, LogicState(uint8(ParityTable256[v])))
 
 			if op == "~^" {
 				b, _ := Z.getBit(0)
