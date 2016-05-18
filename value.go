@@ -44,15 +44,15 @@ type ValueBig struct {
 	undef *big.Int
 }
 
-type Value interface {
+type ValueInterface interface {
 	BitLen() uint
 	GetBit(uint) (LogicState, error)
-	GetBits([]uint) (Value, error)
-	GetBitRange(low, high uint) (Value, error)
+	GetBits([]uint) (ValueInterface, error)
+	GetBitRange(low, high uint) (ValueInterface, error)
 	SetBit(uint, LogicState) error
-	SetBitRange(uint, uint, Value) error
-	Unary(string) Value
-	Binary(string, Value) Value
+	SetBitRange(uint, uint, ValueInterface) error
+	Unary(string) ValueInterface
+	Binary(string, ValueInterface) ValueInterface
 }
 
 
@@ -112,7 +112,7 @@ func (X *ValueBig) GetBit(b uint) (LogicState, error) {
 	}
 }
 
-func (X *Value64) GetBits(bits []uint) (Value, error) {
+func (X *Value64) GetBits(bits []uint) (ValueInterface, error) {
 	Z := NewValue(uint(len(bits)))
 
 	sort.Sort(UintSlice(bits))
@@ -126,7 +126,7 @@ func (X *Value64) GetBits(bits []uint) (Value, error) {
 	return Z, nil
 }
 
-func (X *ValueBig) GetBits(bits []uint) (Value, error) {
+func (X *ValueBig) GetBits(bits []uint) (ValueInterface, error) {
 	Z := NewValue(uint(len(bits)))
 
 	sort.Sort(UintSlice(bits))
@@ -140,7 +140,7 @@ func (X *ValueBig) GetBits(bits []uint) (Value, error) {
 	return Z, nil
 }
 
-func (X *Value64) GetBitRange(low, high uint) (Value, error) {
+func (X *Value64) GetBitRange(low, high uint) (ValueInterface, error) {
 	if low > high {
 		high, low = low, high
 	}
@@ -160,7 +160,7 @@ func (X *Value64) GetBitRange(low, high uint) (Value, error) {
 	return Z, nil
 }
 
-func (X *ValueBig) GetBitRange(low, high uint) (Value, error) {
+func (X *ValueBig) GetBitRange(low, high uint) (ValueInterface, error) {
 	if low > high {
 		high, low = low, high
 	}
@@ -253,7 +253,7 @@ func (X *ValueBig) SetBit(b uint, v LogicState) error {
 // Sets a bit range within X. X[low] will get set to v[0] while
 // X[high] gets set to v[high - low]. If low > high, they are automatically
 // swapped such that high > low always.
-func (X *Value64) SetBitRange(low, high uint, v Value) error {
+func (X *Value64) SetBitRange(low, high uint, v ValueInterface) error {
 	if low > high {
 		high, low = low, high
 	}
@@ -291,7 +291,7 @@ func (X *Value64) SetBitRange(low, high uint, v Value) error {
 // Sets a bit range within X. X[low] will get set to v[0] while
 // X[high] gets set to v[high - low]. If low > high, they are automatically
 // swapped such that high > low always.
-func (X *ValueBig) SetBitRange(low, high uint, v Value) error {
+func (X *ValueBig) SetBitRange(low, high uint, v ValueInterface) error {
 	if low > high {
 		high, low = low, high
 	}
@@ -341,7 +341,7 @@ func (X *ValueBig) SetBitRange(low, high uint, v Value) error {
 // Unary operations are: ~ (bit-wise invert) and all reduction operators:
 // | (bitwise OR), ~| (bitwise NOR), & (bitwise AND), ~& (bitwise NAND),
 // ^ (bitwise XOR / even parity), ~^ (bitwise XNOR / odd parity).
-func (X *Value64) Unary(op string) Value {
+func (X *Value64) Unary(op string) ValueInterface {
 	mask := uint64(1 << X.numBits - 1)
 
 	switch op {
@@ -428,7 +428,7 @@ func (X *Value64) Unary(op string) Value {
 // Unary operations are: ~ (bit-wise invert) and all reduction operators:
 // | (bitwise OR), ~| (bitwise NOR), & (bitwise AND), ~& (bitwise NAND),
 // ^ (bitwise XOR / even parity), ~^ (bitwise XNOR / odd parity).
-func (X *ValueBig) Unary(op string) Value {
+func (X *ValueBig) Unary(op string) ValueInterface {
 	var zero big.Int
 	switch op {
 	case "~":
@@ -507,7 +507,7 @@ func (X *ValueBig) Unary(op string) Value {
 
 }
 
-func minNumBits(X, Y Value) uint {
+func minNumBits(X, Y ValueInterface) uint {
 	if X.BitLen() > Y.BitLen() {
 		return Y.BitLen()
 	} else {
@@ -515,7 +515,7 @@ func minNumBits(X, Y Value) uint {
 	}
 }
 
-func (X *Value64) Binary(op string, Y Value) (Z Value) {	
+func (X *Value64) Binary(op string, Y ValueInterface) (Z ValueInterface) {	
 	switch op {
 	case "&":
 		//Z := NewValue(minNumBits(X, Y))
@@ -526,11 +526,11 @@ func (X *Value64) Binary(op string, Y Value) (Z Value) {
 	return
 }
 
-func (X *ValueBig) Binary(op string, Y Value) (Z Value) {
+func (X *ValueBig) Binary(op string, Y ValueInterface) (Z ValueInterface) {
 	return
 }
 
-func NewValue(numBits uint) Value {
+func NewValue(numBits uint) ValueInterface {
 	switch {
 	case numBits <= 64:
 		val := new(Value64)

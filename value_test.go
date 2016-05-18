@@ -87,7 +87,7 @@ func TestValueGetSetBit(t *testing.T) {
 }
 
 func TestValueUnaryOps(t *testing.T) {
-	var val Value
+	var val ValueInterface
 	sizes := []uint{48, 61, 212, 247}
 
 	for _, size := range sizes {
