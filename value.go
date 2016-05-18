@@ -30,34 +30,34 @@ func (A UintSlice) Len() int           { return len(A) }
 func (A UintSlice) Swap(i, j int)      { A[i], A[j] = A[j], A[i] }
 func (A UintSlice) Less(i, j int) bool { return A[i] < A[j] }
 	
-type mbv64 struct {
+type Value64 struct {
 	numBits uint
 	bits uint64
 	hiz uint64
 	undef uint64
 }
 
-type mbvBig struct {
+type ValueBig struct {
 	numBits uint
 	bits *big.Int
 	hiz *big.Int
 	undef *big.Int
 }
 
-type MultiBitValue interface {
-	bitLen() uint
-	getBit(uint) (LogicState, error)
-	getBits([]uint) (MultiBitValue, error)
-	getBitRange(low, high uint) (MultiBitValue, error)
-	setBit(uint, LogicState) error
-	setBitRange(uint, uint, MultiBitValue) error
-	unary(string) MultiBitValue
-	binary(string, MultiBitValue) MultiBitValue
+type Value interface {
+	BitLen() uint
+	GetBit(uint) (LogicState, error)
+	GetBits([]uint) (Value, error)
+	GetBitRange(low, high uint) (Value, error)
+	SetBit(uint, LogicState) error
+	SetBitRange(uint, uint, Value) error
+	Unary(string) Value
+	Binary(string, Value) Value
 }
 
 
-func (X *mbv64) copy() (Z *mbv64) {
-	Z = NewMultiBitValue(X.bitLen()).(*mbv64)
+func (X *Value64) copy() (Z *Value64) {
+	Z = NewValue(X.BitLen()).(*Value64)
 	Z.bits = X.bits
 	Z.hiz = X.hiz
 	Z.undef = X.undef
@@ -65,8 +65,8 @@ func (X *mbv64) copy() (Z *mbv64) {
 	return
 }
 
-func (X *mbvBig) copy() (Z *mbvBig) {
-	Z = NewMultiBitValue(X.bitLen()).(*mbvBig)
+func (X *ValueBig) copy() (Z *ValueBig) {
+	Z = NewValue(X.BitLen()).(*ValueBig)
 	Z.bits.SetBytes(X.bits.Bytes())
 	Z.hiz.SetBytes(X.hiz.Bytes())
 	Z.undef.SetBytes(X.undef.Bytes())
@@ -74,15 +74,15 @@ func (X *mbvBig) copy() (Z *mbvBig) {
 	return
 }
 
-func (X *mbv64) bitLen() uint {
+func (X *Value64) BitLen() uint {
 	return X.numBits
 }
 
-func (X *mbvBig) bitLen() uint {
+func (X *ValueBig) BitLen() uint {
 	return X.numBits
 }
 
-func (X *mbv64) getBit(b uint) (LogicState, error) {
+func (X *Value64) GetBit(b uint) (LogicState, error) {
 	if b > (X.numBits - 1) {
 		return Undefined, fmt.Errorf("Index (%d) out of bounds.\n", b)
 	}
@@ -98,7 +98,7 @@ func (X *mbv64) getBit(b uint) (LogicState, error) {
 	}
 }
 
-func (X *mbvBig) getBit(b uint) (LogicState, error) {
+func (X *ValueBig) GetBit(b uint) (LogicState, error) {
 	if b > (X.numBits - 1) {
 		return Undefined, fmt.Errorf("Index (%d) out of bounds.\n", b)
 	}
@@ -112,35 +112,35 @@ func (X *mbvBig) getBit(b uint) (LogicState, error) {
 	}
 }
 
-func (X *mbv64) getBits(bits []uint) (MultiBitValue, error) {
-	Z := NewMultiBitValue(uint(len(bits)))
+func (X *Value64) GetBits(bits []uint) (Value, error) {
+	Z := NewValue(uint(len(bits)))
 
 	sort.Sort(UintSlice(bits))
 	for i, b := range bits {
-		bitVal, err := X.getBit(b)
+		bitVal, err := X.GetBit(b)
 		if err != nil {
 			return nil, err
 		}
-		Z.setBit(uint(i), bitVal)
+		Z.SetBit(uint(i), bitVal)
 	}
 	return Z, nil
 }
 
-func (X *mbvBig) getBits(bits []uint) (MultiBitValue, error) {
-	Z := NewMultiBitValue(uint(len(bits)))
+func (X *ValueBig) GetBits(bits []uint) (Value, error) {
+	Z := NewValue(uint(len(bits)))
 
 	sort.Sort(UintSlice(bits))
 	for i, b := range bits {
-		bitVal, err := X.getBit(b)
+		bitVal, err := X.GetBit(b)
 		if err != nil {
 			return nil, err
 		}
-		Z.setBit(uint(i), bitVal)
+		Z.SetBit(uint(i), bitVal)
 	}
 	return Z, nil
 }
 
-func (X *mbv64) getBitRange(low, high uint) (MultiBitValue, error) {
+func (X *Value64) GetBitRange(low, high uint) (Value, error) {
 	if low > high {
 		high, low = low, high
 	}
@@ -151,7 +151,7 @@ func (X *mbv64) getBitRange(low, high uint) (MultiBitValue, error) {
 		return nil, fmt.Errorf("high (%d) index out of bounds.\n", high)
 	}
 	newNumBits := high - low + 1
-	Z := NewMultiBitValue(newNumBits).(*mbv64)
+	Z := NewValue(newNumBits).(*Value64)
 	mask := uint64(1 << newNumBits) - 1
 	Z.bits = (X.bits >> low) & mask
 	Z.hiz = (X.hiz >> low) & mask
@@ -160,7 +160,7 @@ func (X *mbv64) getBitRange(low, high uint) (MultiBitValue, error) {
 	return Z, nil
 }
 
-func (X *mbvBig) getBitRange(low, high uint) (MultiBitValue, error) {
+func (X *ValueBig) GetBitRange(low, high uint) (Value, error) {
 	if low > high {
 		high, low = low, high
 	}
@@ -173,7 +173,7 @@ func (X *mbvBig) getBitRange(low, high uint) (MultiBitValue, error) {
 	newNumBits := high - low + 1
 	if newNumBits <= 64 {
 		t := new(big.Int)
-		Z := NewMultiBitValue(newNumBits).(*mbv64)
+		Z := NewValue(newNumBits).(*Value64)
 		mask := uint64(1 << newNumBits) - 1
 		Z.bits  = t.Rsh(X.bits,  low).Uint64() & mask
 		t.SetUint64(uint64(0))
@@ -182,7 +182,7 @@ func (X *mbvBig) getBitRange(low, high uint) (MultiBitValue, error) {
 		Z.undef = t.Rsh(X.undef, low).Uint64() & mask
 		return Z, nil
 	} else {
-		Z := NewMultiBitValue(newNumBits).(*mbvBig)
+		Z := NewValue(newNumBits).(*ValueBig)
 		one := new(big.Int)
 		one.SetUint64(uint64(1))
 		mask := new(big.Int)
@@ -195,7 +195,7 @@ func (X *mbvBig) getBitRange(low, high uint) (MultiBitValue, error) {
 	}
 }
 
-func (X *mbv64) setBit(b uint, v LogicState) error {
+func (X *Value64) SetBit(b uint, v LogicState) error {
 	if b > (X.numBits - 1) {
 		return fmt.Errorf("Index (%d) out of bounds.\n", b)
 	}
@@ -223,7 +223,7 @@ func (X *mbv64) setBit(b uint, v LogicState) error {
 	return nil
 }
 
-func (X *mbvBig) setBit(b uint, v LogicState) error {
+func (X *ValueBig) SetBit(b uint, v LogicState) error {
 	if b > (X.numBits - 1) {
 		return fmt.Errorf("Index (%d) out of bounds.\n", b)
 	}
@@ -253,7 +253,7 @@ func (X *mbvBig) setBit(b uint, v LogicState) error {
 // Sets a bit range within X. X[low] will get set to v[0] while
 // X[high] gets set to v[high - low]. If low > high, they are automatically
 // swapped such that high > low always.
-func (X *mbv64) setBitRange(low, high uint, v MultiBitValue) error {
+func (X *Value64) SetBitRange(low, high uint, v Value) error {
 	if low > high {
 		high, low = low, high
 	}
@@ -264,19 +264,19 @@ func (X *mbv64) setBitRange(low, high uint, v MultiBitValue) error {
 		return fmt.Errorf("high (%d) index out of bounds.\n", high)
 	}
 	numBits := high - low + 1
-	if numBits != v.bitLen() {
-		return fmt.Errorf("Number of bits specified by low (%d), high (%d) = %d does not equal number of bits passed in (%d).", low, high, numBits, v.bitLen())
+	if numBits != v.BitLen() {
+		return fmt.Errorf("Number of bits specified by low (%d), high (%d) = %d does not equal number of bits passed in (%d).", low, high, numBits, v.BitLen())
 	}
 
 	// Clear out the specified range of bits then OR in the new bits
 	mask := uint64(1 << numBits - 1) << low
-	var n *mbv64
+	var n *Value64
 	switch v := v.(type) {
-	case *mbv64:
+	case *Value64:
 		n = v
-	case *mbvBig:
-		n = new(mbv64)
-		n.numBits = v.bitLen()
+	case *ValueBig:
+		n = new(Value64)
+		n.numBits = v.BitLen()
 		n.bits  = v.bits.Uint64()
 		n.hiz   = v.hiz.Uint64()
 		n.undef = v.undef.Uint64()
@@ -291,7 +291,7 @@ func (X *mbv64) setBitRange(low, high uint, v MultiBitValue) error {
 // Sets a bit range within X. X[low] will get set to v[0] while
 // X[high] gets set to v[high - low]. If low > high, they are automatically
 // swapped such that high > low always.
-func (X *mbvBig) setBitRange(low, high uint, v MultiBitValue) error {
+func (X *ValueBig) SetBitRange(low, high uint, v Value) error {
 	if low > high {
 		high, low = low, high
 	}
@@ -302,18 +302,18 @@ func (X *mbvBig) setBitRange(low, high uint, v MultiBitValue) error {
 		return fmt.Errorf("high (%d) index out of bounds.\n", high)
 	}
 	numBits := high - low + 1
-	if numBits != v.bitLen() {
-		return fmt.Errorf("Number of bits specified by low (%d), high (%d) = %d does not equal number of bits passed in (%d).", low, high, numBits, v.bitLen())
+	if numBits != v.BitLen() {
+		return fmt.Errorf("Number of bits specified by low (%d), high (%d) = %d does not equal number of bits passed in (%d).", low, high, numBits, v.BitLen())
 	}
 
-	var n *mbvBig
+	var n *ValueBig
 	switch v := v.(type) {
-	case *mbv64:
-		n = new(mbvBig)
+	case *Value64:
+		n = new(ValueBig)
 		n.bits.SetUint64(v.bits)
 		n.hiz.SetUint64(v.hiz)
 		n.undef.SetUint64(v.undef)
-	case *mbvBig:
+	case *ValueBig:
 		n = v
 	}
 		
@@ -337,11 +337,11 @@ func (X *mbvBig) setBitRange(low, high uint, v MultiBitValue) error {
 	return nil
 }
 
-// Performs a unary operation on X and returns a new MultiBitValue. Legal
-// unary operations are: ~ (bit-wise invert) and all reduction operators:
+// Performs a Unary operation on X and returns a new Value. Legal
+// Unary operations are: ~ (bit-wise invert) and all reduction operators:
 // | (bitwise OR), ~| (bitwise NOR), & (bitwise AND), ~& (bitwise NAND),
 // ^ (bitwise XOR / even parity), ~^ (bitwise XNOR / odd parity).
-func (X *mbv64) unary(op string) MultiBitValue {
+func (X *Value64) Unary(op string) Value {
 	mask := uint64(1 << X.numBits - 1)
 
 	switch op {
@@ -350,43 +350,43 @@ func (X *mbv64) unary(op string) MultiBitValue {
 		Z.bits = ^Z.bits & mask
 		return Z
 	case "|", "~|":
-		Z := NewMultiBitValue(1)
+		Z := NewValue(1)
 		if X.hiz & mask != 0 || X.undef & mask != 0 {
-			Z.setBit(0, Undefined)
+			Z.SetBit(0, Undefined)
 		} else {
 			if X.bits & mask != 0 {
-				Z.setBit(0, Hi)
+				Z.SetBit(0, Hi)
 			} else {
-				Z.setBit(0, Lo)
+				Z.SetBit(0, Lo)
 			}
 
 			if op == "~|" {
-				b, _ := Z.getBit(0)
-				Z.setBit(0, b.Unary('~'))
+				b, _ := Z.GetBit(0)
+				Z.SetBit(0, b.Unary('~'))
 			}
 		}
 		return Z
 	case "&", "~&":
-		Z := NewMultiBitValue(1)
+		Z := NewValue(1)
 		if X.hiz & mask != 0 || X.undef & mask != 0 {
-			Z.setBit(0, Undefined)
+			Z.SetBit(0, Undefined)
 		} else {
 			if X.bits == mask {
-				Z.setBit(0, Hi)
+				Z.SetBit(0, Hi)
 			} else {
-				Z.setBit(0, Lo)
+				Z.SetBit(0, Lo)
 			}
 
 			if op == "~&" {
-				b, _ := Z.getBit(0)
-				Z.setBit(0, b.Unary('~'))
+				b, _ := Z.GetBit(0)
+				Z.SetBit(0, b.Unary('~'))
 			}
 		}
 		return Z
 	case "^", "~^":
-		Z := NewMultiBitValue(1)
+		Z := NewValue(1)
 		if X.hiz & mask != 0 || X.undef & mask != 0 {
-			Z.setBit(0, Undefined)
+			Z.SetBit(0, Undefined)
 		} else {
 			// XOR each byte and then look up the resultant
 			// value in the parity look up table
@@ -409,11 +409,11 @@ func (X *mbv64) unary(op string) MultiBitValue {
 					v ^= uint8((X.bits >> s) & 0xff)
 				}
 			}
-			Z.setBit(0, LogicState(uint8(ParityTable256[v])))
+			Z.SetBit(0, LogicState(uint8(ParityTable256[v])))
 
 			if op == "~^" {
-				b, _ := Z.getBit(0)
-				Z.setBit(0, b.Unary('~'))
+				b, _ := Z.GetBit(0)
+				Z.SetBit(0, b.Unary('~'))
 			}
 		}
 		return Z
@@ -424,11 +424,11 @@ func (X *mbv64) unary(op string) MultiBitValue {
 
 }
 
-// Performs a unary operation on X and returns a new MultiBitValue. Legal
-// unary operations are: ~ (bit-wise invert) and all reduction operators:
+// Performs a Unary operation on X and returns a new Value. Legal
+// Unary operations are: ~ (bit-wise invert) and all reduction operators:
 // | (bitwise OR), ~| (bitwise NOR), & (bitwise AND), ~& (bitwise NAND),
 // ^ (bitwise XOR / even parity), ~^ (bitwise XNOR / odd parity).
-func (X *mbvBig) unary(op string) MultiBitValue {
+func (X *ValueBig) Unary(op string) Value {
 	var zero big.Int
 	switch op {
 	case "~":
@@ -436,43 +436,43 @@ func (X *mbvBig) unary(op string) MultiBitValue {
 		Z.bits.Not(Z.bits)
 		return Z
 	case "|", "~|":
-		Z := NewMultiBitValue(1)
+		Z := NewValue(1)
 		if X.hiz.Cmp(&zero) != 0 || X.undef.Cmp(&zero) != 0 {
-			Z.setBit(0, Undefined)
+			Z.SetBit(0, Undefined)
 		} else {
 			if X.bits.Cmp(&zero) != 0 {
-				Z.setBit(0, Hi)
+				Z.SetBit(0, Hi)
 			} else {
-				Z.setBit(0, Lo)
+				Z.SetBit(0, Lo)
 			}
 			if op == "~|" {
-				b, _ := Z.getBit(0)
-				Z.setBit(0, b.Unary('~'))
+				b, _ := Z.GetBit(0)
+				Z.SetBit(0, b.Unary('~'))
 			}
 		}
 		return Z
 	case "&", "~&":
-		Z := NewMultiBitValue(1)
+		Z := NewValue(1)
 		if X.hiz.Cmp(&zero) != 0 || X.undef.Cmp(&zero) != 0 {
-			Z.setBit(0, Undefined)
+			Z.SetBit(0, Undefined)
 		} else {
 			var mask big.Int
 			mask.Sub(mask.Exp(big.NewInt(2), big.NewInt(int64(X.numBits)), nil), big.NewInt(1))
 			if X.bits.Cmp(&mask) == 0 {
-				Z.setBit(0, Hi)
+				Z.SetBit(0, Hi)
 			} else {
-				Z.setBit(0, Lo)
+				Z.SetBit(0, Lo)
 			}
 			if op == "~&" {
-				b, _ := Z.getBit(0)
-				Z.setBit(0, b.Unary('~'))
+				b, _ := Z.GetBit(0)
+				Z.SetBit(0, b.Unary('~'))
 			}
 		}
 		return Z
 	case "^", "~^":
-		Z := NewMultiBitValue(1)
+		Z := NewValue(1)
 		if X.hiz.Cmp(&zero) != 0 || X.undef.Cmp(&zero) != 0 {
-			Z.setBit(0, Undefined)
+			Z.SetBit(0, Undefined)
 		} else {
 			// XOR each byte and then look up the resultant
 			// value in the parity look up table
@@ -492,11 +492,11 @@ func (X *mbvBig) unary(op string) MultiBitValue {
 					v ^= uint8(by)
 				}
 			}
-			Z.setBit(0, LogicState(uint8(ParityTable256[v])))
+			Z.SetBit(0, LogicState(uint8(ParityTable256[v])))
 
 			if op == "~^" {
-				b, _ := Z.getBit(0)
-				Z.setBit(0, b.Unary('~'))
+				b, _ := Z.GetBit(0)
+				Z.SetBit(0, b.Unary('~'))
 			}
 		}
 		return Z
@@ -507,18 +507,18 @@ func (X *mbvBig) unary(op string) MultiBitValue {
 
 }
 
-func minNumBits(X, Y MultiBitValue) uint {
-	if X.bitLen() > Y.bitLen() {
-		return Y.bitLen()
+func minNumBits(X, Y Value) uint {
+	if X.BitLen() > Y.BitLen() {
+		return Y.BitLen()
 	} else {
-		return X.bitLen()
+		return X.BitLen()
 	}
 }
 
-func (X *mbv64) binary(op string, Y MultiBitValue) (Z MultiBitValue) {	
+func (X *Value64) Binary(op string, Y Value) (Z Value) {	
 	switch op {
 	case "&":
-		//Z := NewMultiBitValue(minNumBits(X, Y))
+		//Z := NewValue(minNumBits(X, Y))
 		
 	case "+":
 	}
@@ -526,23 +526,23 @@ func (X *mbv64) binary(op string, Y MultiBitValue) (Z MultiBitValue) {
 	return
 }
 
-func (X *mbvBig) binary(op string, Y MultiBitValue) (Z MultiBitValue) {
+func (X *ValueBig) Binary(op string, Y Value) (Z Value) {
 	return
 }
 
-func NewMultiBitValue(numBits uint) MultiBitValue {
+func NewValue(numBits uint) Value {
 	switch {
 	case numBits <= 64:
-		mbv := new(mbv64)
-		mbv.numBits = numBits
-		return mbv
+		val := new(Value64)
+		val.numBits = numBits
+		return val
 	case numBits > 64:
-		mbv := new(mbvBig)
-		mbv.numBits = numBits
-		mbv.bits  = new(big.Int)
-		mbv.hiz   = new(big.Int)
-		mbv.undef = new(big.Int)
-		return mbv
+		val := new(ValueBig)
+		val.numBits = numBits
+		val.bits  = new(big.Int)
+		val.hiz   = new(big.Int)
+		val.undef = new(big.Int)
+		return val
 	default:
 		return nil
 	}
