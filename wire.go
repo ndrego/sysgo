@@ -16,7 +16,7 @@ func (A *Wire) computeValue() {
 	if len(A.drivers) > 0 {
 		v = A.drivers[0].GetValue()
 		for i := 1; i < len(A.drivers); i++ {
-			v = CombineLogicState(v, A.drivers[i].GetValue())
+			v = v.Combine(A.drivers[i].GetValue())
 		}
 	} else {
 		v = Undefined

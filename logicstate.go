@@ -15,15 +15,15 @@ const (
 )
 
 
-func CombineLogicState(cur, next LogicState) LogicState {
-	if cur == next {
-		return cur
-	} else if cur == Undefined || next == Undefined {
+func (A LogicState) Combine(l LogicState) LogicState {
+	if A == l {
+		return A
+	} else if A == Undefined || l == Undefined {
 		return Undefined
-	} else if cur == HiZ && (next == Lo || next == Hi) {
-		return next
-	} else if (cur == Lo || cur == Hi) && next == HiZ {
-		return cur
+	} else if A == HiZ && (l == Lo || l == Hi) {
+		return l
+	} else if (A == Lo || A == Hi) && l == HiZ {
+		return A
 	}
 
 	return Undefined
