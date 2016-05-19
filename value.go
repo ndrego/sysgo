@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/big"
 	"sort"
+	"strings"
 )
 
 var ParityTable256 = [...]int{
@@ -29,7 +30,15 @@ type UintSlice []uint
 func (A UintSlice) Len() int           { return len(A) }
 func (A UintSlice) Swap(i, j int)      { A[i], A[j] = A[j], A[i] }
 func (A UintSlice) Less(i, j int) bool { return A[i] < A[j] }
-	
+
+// A single-bit value. We optimize for single bit
+// values since there are many wires in a design and want them
+// to be as fast as possible.
+type Value1 struct {
+	v LogicState
+}
+
+// Value struct capable of representing 1-64 bits
 type Value64 struct {
 	numBits uint
 	bits uint64
@@ -37,6 +46,7 @@ type Value64 struct {
 	undef uint64
 }
 
+// Value struct capable of representing >64 bits 
 type ValueBig struct {
 	numBits uint
 	bits *big.Int
@@ -55,6 +65,11 @@ type ValueInterface interface {
 	Binary(string, ValueInterface) ValueInterface
 }
 
+func (X *Value1) copy() (Z *Value1) {
+	Z = NewValue(1).(*Value1)
+	Z.v = X.v
+	return
+}
 
 func (X *Value64) copy() (Z *Value64) {
 	Z = NewValue(X.BitLen()).(*Value64)
@@ -74,12 +89,23 @@ func (X *ValueBig) copy() (Z *ValueBig) {
 	return
 }
 
+func (X *Value1) BitLen() uint {
+	return uint(1)
+}
+
 func (X *Value64) BitLen() uint {
 	return X.numBits
 }
 
 func (X *ValueBig) BitLen() uint {
 	return X.numBits
+}
+
+func (X *Value1) GetBit(b uint) (LogicState, error) {
+	if b != 0 {
+		return Undefined, fmt.Errorf("Index (%d) out of bounds.\n", b)
+	}
+	return X.v, nil
 }
 
 func (X *Value64) GetBit(b uint) (LogicState, error) {
@@ -112,6 +138,10 @@ func (X *ValueBig) GetBit(b uint) (LogicState, error) {
 	}
 }
 
+func (X *Value1) GetBits(bits []uint) (ValueInterface, error) {
+	return nil, fmt.Errorf("Single bit value does not support GetBits().\n")
+}
+
 func (X *Value64) GetBits(bits []uint) (ValueInterface, error) {
 	Z := NewValue(uint(len(bits)))
 
@@ -138,6 +168,10 @@ func (X *ValueBig) GetBits(bits []uint) (ValueInterface, error) {
 		Z.SetBit(uint(i), bitVal)
 	}
 	return Z, nil
+}
+
+func (X *Value1) GetBitRange(low, high uint) (ValueInterface, error) {
+	return nil, fmt.Errorf("Single bit value does not support GetBits().\n")
 }
 
 func (X *Value64) GetBitRange(low, high uint) (ValueInterface, error) {
@@ -195,6 +229,14 @@ func (X *ValueBig) GetBitRange(low, high uint) (ValueInterface, error) {
 	}
 }
 
+func (X *Value1) SetBit(b uint, v LogicState) error {
+	if b != 0 {
+		return fmt.Errorf("Index (%d) out of bounds.\n", b)
+	}
+	X.v = v
+	return nil
+}
+
 func (X *Value64) SetBit(b uint, v LogicState) error {
 	if b > (X.numBits - 1) {
 		return fmt.Errorf("Index (%d) out of bounds.\n", b)
@@ -248,6 +290,10 @@ func (X *ValueBig) SetBit(b uint, v LogicState) error {
 		X.undef.AndNot(X.undef, mask)
 	}
 	return nil
+}
+
+func (X *Value1) SetBitRange(low, high uint, v ValueInterface) error {
+	return fmt.Errorf("Single bit value does not support SetBitRange().\n")
 }
 
 // Sets a bit range within X. X[low] will get set to v[0] while
@@ -335,6 +381,22 @@ func (X *ValueBig) SetBitRange(low, high uint, v ValueInterface) error {
 	X.undef.Or(X.undef, t.Lsh(n.undef, low).And(t, mask))
 
 	return nil
+}
+
+func (X *Value1) Unary(op string) ValueInterface {
+	Z := X.copy()
+	if strings.HasPrefix(op, "~") {
+		switch X.v {
+		case Lo:
+			Z.v = Hi
+		case Hi:
+			Z.v = Lo
+		default:
+			Z.v = Undefined
+		}
+	}
+
+	return Z
 }
 
 // Performs a Unary operation on X and returns a new Value. Legal
@@ -515,6 +577,10 @@ func minNumBits(X, Y ValueInterface) uint {
 	}
 }
 
+func (X *Value1) Binary(op string, Y ValueInterface) (Z ValueInterface) {
+	return
+}
+
 func (X *Value64) Binary(op string, Y ValueInterface) (Z ValueInterface) {	
 	switch op {
 	case "&":
@@ -532,6 +598,9 @@ func (X *ValueBig) Binary(op string, Y ValueInterface) (Z ValueInterface) {
 
 func NewValue(numBits uint) ValueInterface {
 	switch {
+	case numBits == 1:
+		val := new(Value1)
+		return val
 	case numBits <= 64:
 		val := new(Value64)
 		val.numBits = numBits
