@@ -60,6 +60,7 @@ type ValueBig struct {
 type ValueInterface interface {
 	BitLen() uint
 	combine(ValueInterface) error
+	Concat(ValueInterface) ValueInterface
 	GetBit(uint) LogicState
 	GetBits([]uint) ValueInterface
 	GetBitRange(low, high uint) ValueInterface
@@ -106,6 +107,33 @@ func (X *ValueBig) BitLen() uint {
 	return X.numBits
 }
 
+// Returns Z = {X, Y}
+func (X *Value1) Concat(Y ValueInterface) ValueInterface {
+	yNumBits := Y.BitLen()
+	Z := NewValue(1 + yNumBits)
+	Z.SetBitRange(0, yNumBits - 1, Y)
+	Z.SetBit(yNumBits, X.GetBit(0))
+	return Z
+}
+
+// Returns Z = {X, Y}
+func (X *Value64) Concat(Y ValueInterface) ValueInterface {
+	yNumBits := Y.BitLen()
+	Z := NewValue(X.numBits + yNumBits)
+	Z.SetBitRange(0, yNumBits - 1, Y)
+	Z.SetBitRange(yNumBits, yNumBits + X.numBits - 1, X)
+	return Z
+}
+
+// Returns Z = {X, Y}
+func (X *ValueBig) Concat(Y ValueInterface) ValueInterface {
+	yNumBits := Y.BitLen()
+	Z := NewValue(X.numBits + yNumBits)
+	Z.SetBitRange(0, yNumBits - 1, Y)
+	Z.SetBitRange(yNumBits, yNumBits + X.numBits - 1, X)
+	return Z
+}
+	
 func (X *Value1) GetBit(b uint) LogicState {
 	if b != 0 {
 		fmt.Printf("Index (%d) out of bounds.\n", b)
@@ -326,14 +354,28 @@ func (X *Value64) SetBitRange(low, high uint, v ValueInterface) error {
 	mask := uint64(1 << numBits - 1) << low
 	var n *Value64
 	switch v := v.(type) {
+	case *Value1:
+		n = new(Value64)
+		n.numBits = 1
+		switch v.v {
+		case Lo, Hi:
+			n.bits = uint64(v.v)
+		case HiZ:
+			n.hiz = uint64(1)
+		case Undefined:
+			n.undef = uint64(1)
+		}
 	case *Value64:
 		n = v
 	case *ValueBig:
+		m := new(big.Int)
+		t := new(big.Int)
+		m.SetUint64(uint64(1 << 64 - 1))
 		n = new(Value64)
 		n.numBits = v.BitLen()
-		n.bits  = v.bits.Uint64()
-		n.hiz   = v.hiz.Uint64()
-		n.undef = v.undef.Uint64()
+		n.bits  = t.And(m, v.bits).Uint64()
+		n.hiz   = t.And(m, v.hiz).Uint64()
+		n.undef = t.And(m, v.undef).Uint64()
 	}
 	X.bits  = (X.bits  & ^mask) | ((n.bits  << low) & mask)
 	X.hiz   = (X.hiz   & ^mask) | ((n.hiz   << low) & mask)
@@ -362,8 +404,24 @@ func (X *ValueBig) SetBitRange(low, high uint, v ValueInterface) error {
 
 	var n *ValueBig
 	switch v := v.(type) {
+	case *Value1:
+		n = new(ValueBig)
+		n.bits = new(big.Int)
+		n.hiz = new(big.Int)
+		n.undef = new(big.Int)
+		switch v.v {
+		case Lo, Hi:
+			n.bits.SetBit(n.bits, 0, uint(v.v))
+		case HiZ:
+			n.hiz.SetBit(n.hiz, 0, uint(1))
+		case Undefined:
+			n.undef.SetBit(n.undef, 0, uint(1))
+		}
 	case *Value64:
 		n = new(ValueBig)
+		n.bits = new(big.Int)
+		n.hiz = new(big.Int)
+		n.undef = new(big.Int)
 		n.bits.SetUint64(v.bits)
 		n.hiz.SetUint64(v.hiz)
 		n.undef.SetUint64(v.undef)

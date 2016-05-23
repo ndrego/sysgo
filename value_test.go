@@ -214,6 +214,53 @@ func TestValue64GetSetBit(t *testing.T) {
 
 }
 
+func TestValueConcat(t *testing.T) {
+	assert := assert.New(t)
+
+	x, _ := NewValueString("1'b1")
+	y, _ := NewValueString("1'b0")
+	z := x.Concat(y)
+	assert.Equal("2'b10", z.Text('b'), "Incorrect concatenation")
+
+	y, _ = NewValueString("1'bx")
+	z = x.Concat(y)
+	assert.Equal("2'b1x", z.Text('b'), "Incorrect concatenation")
+
+	x, _ = NewValueString("1'bz")
+	z = x.Concat(y)
+	assert.Equal("2'bzx", z.Text('b'), "Incorrect concatenation")
+
+	x, _ = NewValueString("3'b101")
+	y, _ = NewValueString("1'b0")
+	z = x.Concat(y)
+	assert.Equal("4'b1010", z.Text('b'), "Incorrect concatenation")
+
+	z = y.Concat(x)
+	assert.Equal("4'b0101", z.Text('b'), "Incorrect concatenation")
+	
+	x, _ = NewValueString("65'h1deadbeef01234567")
+	y, _ = NewValueString("3'b101")
+	z = y.Concat(x)
+	assert.Equal("68'hbdeadbeef01234567", z.Text('h'), "Incorrect concatenation")
+
+	z = x.Concat(y)
+	assert.Equal("68'hef56df778091a2b3d", z.Text('h'), "Incorrect concatenation")
+
+	y, _ = NewValueString("1'b1")
+	z = x.Concat(y)
+	assert.Equal("66'h3bd5b7dde02468acf", z.Text('h'), "Incorrect concatenation")
+
+	z = y.Concat(x)
+	assert.Equal("66'h3deadbeef01234567", z.Text('h'), "Incorrect concatenation")
+
+	y, _ = NewValueString("32'hbeefdead")
+	z = x.Concat(y)
+	assert.Equal("97'h1deadbeef01234567beefdead", z.Text('h'), "Incorrect concatenation")
+
+	z = y.Concat(x)
+	assert.Equal("97'h17ddfbd5bdeadbeef01234567", z.Text('h'), "Incorrect concatenation")	
+}
+
 func TestValue1UnaryOps(t *testing.T) {
 	assert := assert.New(t)
 
