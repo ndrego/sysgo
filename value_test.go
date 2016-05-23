@@ -44,6 +44,9 @@ func TestNewValueString(t *testing.T) {
 	assert.Equal(uint64(0xdeadbeef), v.(*Value64).bits,  "Incorrect value for bits")
 	assert.Equal(uint64(0),          v.(*Value64).hiz,   "Incorrect value for hiz")
 	assert.Equal(uint64(0),          v.(*Value64).undef, "Incorrect value for undef")
+	assert.Equal("32'b11011110101011011011111011101111", v.(*Value64).Text('b'), "Incorrect binary text")
+	assert.Equal("32'o33653337357", v.(*Value64).Text('o'), "Incorrect octal text")
+	assert.Equal("32'hdeadbeef", v.(*Value64).Text('h'), "Incorrect hex text")
 
 	v, e = NewValueString("32'hdeadbezf")
 	assert.Nil(e, "Error exists")
@@ -56,6 +59,10 @@ func TestNewValueString(t *testing.T) {
 	assert.Equal(uint64(0xd0adbe0f), v.(*Value64).bits,  "Incorrect value for bits")
 	assert.Equal(uint64(0x000000f0), v.(*Value64).hiz,   "Incorrect value for hiz")
 	assert.Equal(uint64(0x0f000000), v.(*Value64).undef, "Incorrect value for undef")
+	assert.Equal("32'b1101xxxx1010110110111110zzzz1111", v.(*Value64).Text('b'), "Incorrect binary text")
+	assert.Equal("32'o3xx53337zz7", v.(*Value64).Text('o'), "Incorrect octal text")
+	assert.Equal("32'hdxadbezf", v.(*Value64).Text('h'), "Incorrect hex text")
+	
 
 	v, e = NewValueString("'hdxadbezf")
 	assert.Nil(e, "Error exists")
@@ -91,6 +98,7 @@ func TestNewValueString(t *testing.T) {
 	assert.Equal(0, v.(*ValueBig).bits.Cmp( &exp),  "Incorrect value for bits")
 	assert.Equal(0, v.(*ValueBig).hiz.Cmp(  &zero),  "Incorrect value for hiz")
 	assert.Equal(0, v.(*ValueBig).undef.Cmp(&zero), "Incorrect value for undef")
+	assert.Equal("65'h1deadbeef01234567", v.(*ValueBig).Text('h'))
 
 	v, e = NewValueString("68'hzdeadbeef01234567")
 	exp.SetString("0x0deadbeef01234567", 0)
@@ -100,15 +108,15 @@ func TestNewValueString(t *testing.T) {
 	assert.Equal(0, v.(*ValueBig).hiz.Cmp(  &hiz),  "Incorrect value for hiz")
 	assert.Equal(0, v.(*ValueBig).undef.Cmp(&zero), "Incorrect value for undef")
 
-	v, e = NewValueString("68'hzdeadzxef01234567")
+	v, e = NewValueString("65'hzdeadzxef01234567")
 	exp.SetString(  "0x0dead00ef01234567", 0)
-	hiz.SetString(  "0xf0000f00000000000", 0)
+	hiz.SetString(  "0x10000f00000000000", 0)
 	undef.SetString("0x000000f0000000000", 0)
 	assert.Nil(e, "Error exists")
 	assert.Equal(0, v.(*ValueBig).bits.Cmp( &exp),   "Incorrect value for bits")
 	assert.Equal(0, v.(*ValueBig).hiz.Cmp(  &hiz),   "Incorrect value for hiz")
 	assert.Equal(0, v.(*ValueBig).undef.Cmp(&undef), "Incorrect value for undef")
-	
+	assert.Equal("65'hzdeadzxef01234567", v.(*ValueBig).Text('h'))	
 }
 
 func TestValue1GetSetBit(t *testing.T) {

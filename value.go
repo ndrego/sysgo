@@ -65,6 +65,7 @@ type ValueInterface interface {
 	GetBitRange(low, high uint) ValueInterface
 	SetBit(uint, LogicState) error
 	SetBitRange(uint, uint, ValueInterface) error
+	Text(rune) string
 	Unary(string) ValueInterface
 	Binary(string, ValueInterface) ValueInterface
 }
@@ -699,6 +700,103 @@ func (X *ValueBig) String() string {
 	return s.String()
 }
 
+// base can be either 'b', 'o' or 'h'
+func (X *Value1) Text(base rune) string {
+	s := bytes.NewBufferString("1'")
+	s.WriteRune(base)
+	s.WriteRune(X.v.Rune())
+	return s.String()
+}
+
+// base can be either 'b', 'o' or 'h'
+func (X *Value64) Text(base rune) string {
+	s := bytes.NewBufferString(fmt.Sprintf("%d'%s", X.numBits, string(base)))
+	n := uint(0)
+	fmtSpec := ""
+	switch base {
+	case 'b':
+		n = 1
+		fmtSpec = "%b"
+	case 'o':
+		n = 3
+		fmtSpec = "%o"
+	case 'h':
+		n = 4
+		fmtSpec = "%x"
+	}
+
+	mask := uint64(1 << n - 1)
+
+	r := make([]string, 0, 1)
+	for i := 0; i < int(X.numBits);  {
+		sh := uint(i)
+		str := fmt.Sprintf(fmtSpec, (X.bits >> sh) & mask)
+		if (X.hiz >> sh) & mask != 0 {
+			str = "z"
+		}
+		if (X.undef >> sh) & mask != 0 {
+			str = "x"
+		}
+		r = append(r, str)
+		i += int(n)
+	}
+	for i := len(r) - 1; i >= 0; i-- {
+		s.WriteString(r[i])
+	}
+
+	return s.String()
+}
+
+// base can be either 'b', 'o' or 'h'
+func (X *ValueBig) Text(base rune) string {
+	s := bytes.NewBufferString(fmt.Sprintf("%d'%s", X.numBits, string(base)))
+	n := uint(0)
+	fmtSpec := ""
+	switch base {
+	case 'b':
+		n = 1
+		fmtSpec = "%b"
+	case 'o':
+		n = 3
+		fmtSpec = "%o"
+	case 'h':
+		n = 4
+		fmtSpec = "%x"
+	}
+
+	mask := new(big.Int)
+	one := new(big.Int)
+	zero := new(big.Int)
+	one.SetUint64(uint64(1))
+	mask.Sub(mask.Lsh(one, n), one)
+	
+	r := make([]string, 0, X.numBits / uint(n) + 1)
+	for i := 0; i < int(X.numBits);  {
+		sh := uint(i)
+		t := new(big.Int)
+		t.And(t.Rsh(X.bits, sh), mask)
+		str := fmt.Sprintf(fmtSpec, t.Uint64())
+		t.SetInt64(int64(0))
+		t.And(t.Rsh(X.hiz, sh), mask)
+		if t.Cmp(zero) != 0 {
+			str = "z"
+		}
+		t.SetInt64(int64(0))
+		t.And(t.Rsh(X.undef, sh), mask)
+		if t.Cmp(zero) != 0 {
+			str = "x"
+		}
+		r = append(r, str)
+		i += int(n)
+	}
+	for i := len(r) - 1; i >= 0; i-- {
+		s.WriteString(r[i])
+	}
+
+	return s.String()
+}
+
+
 func NewValue(numBits uint) ValueInterface {
 	switch {
 	case numBits == 1:
@@ -769,12 +867,18 @@ func NewValueString(s string) (ValueInterface, error) {
 		switch value[i] {
 		case 'z':
 			for j := 0; j < bitsPerRune; j++ {
-				hiz = append(hiz, uint(bitIndex+j))
+				k := uint(bitIndex+j)
+				if size == 0 || k < uint(size) {
+					hiz = append(hiz, k)
+				}
 			}
 			value[i] = '0'
 		case 'x':
 			for j := 0; j < bitsPerRune; j++ {
-				undef = append(undef, uint(bitIndex+j))
+				k := uint(bitIndex+j)
+				if size == 0 || k < uint(size) {
+					undef = append(undef, k)
+				}
 			}
 			value[i] = '0'
 		}
