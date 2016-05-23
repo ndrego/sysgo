@@ -522,9 +522,10 @@ func (X *ValueBig) Unary(op string) ValueInterface {
 		if X.hiz.Cmp(&zero) != 0 || X.undef.Cmp(&zero) != 0 {
 			Z.SetBit(0, Undefined)
 		} else {
-			var mask big.Int
-			mask.Sub(mask.Exp(big.NewInt(2), big.NewInt(int64(X.numBits)), nil), big.NewInt(1))
-			if X.bits.Cmp(&mask) == 0 {
+			mask := new(big.Int)
+			one := big.NewInt(int64(1))
+			mask.Sub(mask.Lsh(one, uint(X.numBits)), one)
+			if X.bits.Cmp(mask) == 0 {
 				Z.SetBit(0, Hi)
 			} else {
 				Z.SetBit(0, Lo)
