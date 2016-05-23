@@ -1,9 +1,12 @@
 package sysgo
 
 import (
+	"bytes"
 	"fmt"
 	"math/big"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -56,9 +59,10 @@ type ValueBig struct {
 
 type ValueInterface interface {
 	BitLen() uint
-	GetBit(uint) (LogicState, error)
-	GetBits([]uint) (ValueInterface, error)
-	GetBitRange(low, high uint) (ValueInterface, error)
+	combine(ValueInterface) error
+	GetBit(uint) LogicState
+	GetBits([]uint) ValueInterface
+	GetBitRange(low, high uint) ValueInterface
 	SetBit(uint, LogicState) error
 	SetBitRange(uint, uint, ValueInterface) error
 	Unary(string) ValueInterface
@@ -101,88 +105,87 @@ func (X *ValueBig) BitLen() uint {
 	return X.numBits
 }
 
-func (X *Value1) GetBit(b uint) (LogicState, error) {
+func (X *Value1) GetBit(b uint) LogicState {
 	if b != 0 {
-		return Undefined, fmt.Errorf("Index (%d) out of bounds.\n", b)
+		fmt.Printf("Index (%d) out of bounds.\n", b)
+		return Undefined
 	}
-	return X.v, nil
+	return X.v
 }
 
-func (X *Value64) GetBit(b uint) (LogicState, error) {
+func (X *Value64) GetBit(b uint) LogicState {
 	if b > (X.numBits - 1) {
-		return Undefined, fmt.Errorf("Index (%d) out of bounds.\n", b)
+		fmt.Printf("Index (%d) out of bounds.\n", b)
+		return Undefined
 	}
 
 	mask := uint64(1 << b)
 
 	if X.undef & mask != 0 {
-		return Undefined, nil
+		return Undefined
 	} else if X.hiz & mask > 0 {
-		return HiZ, nil
+		return HiZ
 	} else {
-		return LogicState((X.bits >> b) & 0x1), nil
+		return LogicState((X.bits >> b) & 0x1)
 	}
 }
 
-func (X *ValueBig) GetBit(b uint) (LogicState, error) {
+func (X *ValueBig) GetBit(b uint) LogicState {
 	if b > (X.numBits - 1) {
-		return Undefined, fmt.Errorf("Index (%d) out of bounds.\n", b)
+		fmt.Printf("Index (%d) out of bounds.\n", b)
+		return Undefined
 	}
 
 	if X.undef.Bit(int(b)) == 1 {
-		return Undefined, nil
+		return Undefined
 	} else if X.hiz.Bit(int(b)) == 1 {
-		return HiZ, nil
+		return HiZ
 	} else {
-		return LogicState(X.bits.Bit(int(b))), nil
+		return LogicState(X.bits.Bit(int(b)))
 	}
 }
 
-func (X *Value1) GetBits(bits []uint) (ValueInterface, error) {
-	return nil, fmt.Errorf("Single bit value does not support GetBits().\n")
+func (X *Value1) GetBits(bits []uint) ValueInterface {
+	fmt.Printf("Single bit value does not support GetBits().\n")
+	return nil 
 }
 
-func (X *Value64) GetBits(bits []uint) (ValueInterface, error) {
+func (X *Value64) GetBits(bits []uint) ValueInterface {
 	Z := NewValue(uint(len(bits)))
 
 	sort.Sort(UintSlice(bits))
 	for i, b := range bits {
-		bitVal, err := X.GetBit(b)
-		if err != nil {
-			return nil, err
-		}
-		Z.SetBit(uint(i), bitVal)
+		Z.SetBit(uint(i), X.GetBit(b))
 	}
-	return Z, nil
+	return Z
 }
 
-func (X *ValueBig) GetBits(bits []uint) (ValueInterface, error) {
+func (X *ValueBig) GetBits(bits []uint) ValueInterface {
 	Z := NewValue(uint(len(bits)))
 
 	sort.Sort(UintSlice(bits))
 	for i, b := range bits {
-		bitVal, err := X.GetBit(b)
-		if err != nil {
-			return nil, err
-		}
-		Z.SetBit(uint(i), bitVal)
+		Z.SetBit(uint(i), X.GetBit(b))
 	}
-	return Z, nil
+	return Z
 }
 
-func (X *Value1) GetBitRange(low, high uint) (ValueInterface, error) {
-	return nil, fmt.Errorf("Single bit value does not support GetBits().\n")
+func (X *Value1) GetBitRange(low, high uint) ValueInterface {
+	fmt.Printf("Single bit value does not support GetBits().\n")
+	return nil 
 }
 
-func (X *Value64) GetBitRange(low, high uint) (ValueInterface, error) {
+func (X *Value64) GetBitRange(low, high uint) ValueInterface {
 	if low > high {
 		high, low = low, high
 	}
 	if low > (X.numBits - 1) {
-		return nil, fmt.Errorf("low (%d) index out of bounds.\n", low)
+		fmt.Printf("low (%d) index out of bounds.\n", low)
+		return nil 
 	}
 	if high > (X.numBits - 1) {
-		return nil, fmt.Errorf("high (%d) index out of bounds.\n", high)
+		fmt.Printf("high (%d) index out of bounds.\n", high)
+		return nil 
 	}
 	newNumBits := high - low + 1
 	Z := NewValue(newNumBits).(*Value64)
@@ -191,18 +194,20 @@ func (X *Value64) GetBitRange(low, high uint) (ValueInterface, error) {
 	Z.hiz = (X.hiz >> low) & mask
 	Z.undef = (X.undef >> low) & mask
 
-	return Z, nil
+	return Z
 }
 
-func (X *ValueBig) GetBitRange(low, high uint) (ValueInterface, error) {
+func (X *ValueBig) GetBitRange(low, high uint) ValueInterface {
 	if low > high {
 		high, low = low, high
 	}
 	if low > (X.numBits - 1) {
-		return nil, fmt.Errorf("low (%d) index out of bounds.\n", low)
+		fmt.Printf("low (%d) index out of bounds.\n", low)
+		return nil 
 	}
 	if high > (X.numBits - 1) {
-		return nil, fmt.Errorf("high (%d) index out of bounds.\n", high)
+		fmt.Printf("high (%d) index out of bounds.\n", high)
+		return nil
 	}
 	newNumBits := high - low + 1
 	if newNumBits <= 64 {
@@ -214,7 +219,7 @@ func (X *ValueBig) GetBitRange(low, high uint) (ValueInterface, error) {
 		Z.hiz   = t.Rsh(X.hiz,   low).Uint64() & mask
 		t.SetUint64(uint64(0))
 		Z.undef = t.Rsh(X.undef, low).Uint64() & mask
-		return Z, nil
+		return Z
 	} else {
 		Z := NewValue(newNumBits).(*ValueBig)
 		one := new(big.Int)
@@ -225,7 +230,7 @@ func (X *ValueBig) GetBitRange(low, high uint) (ValueInterface, error) {
 		Z.bits.And(Z.bits.Rsh(X.bits, low), mask)
 		Z.hiz.And(Z.hiz.Rsh(X.hiz, low), mask)
 		Z.undef.And(Z.undef.Rsh(X.undef, low), mask)
-		return Z, nil
+		return Z
 	}
 }
 
@@ -275,18 +280,20 @@ func (X *ValueBig) SetBit(b uint, v LogicState) error {
 	
 	switch v {
 	case Undefined:
-		X.undef.Or(X.undef, mask)
-		X.hiz.AndNot(X.hiz, mask)
+		X.bits.AndNot( X.bits,  mask)
+		X.hiz.AndNot(  X.hiz,   mask)
+		X.undef.Or(    X.undef, mask)
 	case HiZ:
-		X.hiz.Or(X.hiz, mask)
+		X.bits.AndNot( X.bits,  mask)
+		X.hiz.Or(      X.hiz,   mask)
 		X.undef.AndNot(X.undef, mask)
 	case Hi:
-		X.bits.Or(X.bits, mask)
-		X.hiz.AndNot(X.hiz, mask)
+		X.bits.Or(     X.bits,  mask)
+		X.hiz.AndNot(  X.hiz,   mask)
 		X.undef.AndNot(X.undef, mask)
 	case Lo:
-		X.bits.AndNot(X.bits, mask)
-		X.hiz.AndNot(X.hiz, mask)
+		X.bits.AndNot( X.bits,  mask)
+		X.hiz.AndNot(  X.hiz,   mask)
 		X.undef.AndNot(X.undef, mask)
 	}
 	return nil
@@ -423,8 +430,7 @@ func (X *Value64) Unary(op string) ValueInterface {
 			}
 
 			if op == "~|" {
-				b, _ := Z.GetBit(0)
-				Z.SetBit(0, b.Unary('~'))
+				Z.SetBit(0, Z.GetBit(0).Unary('~'))
 			}
 		}
 		return Z
@@ -440,8 +446,7 @@ func (X *Value64) Unary(op string) ValueInterface {
 			}
 
 			if op == "~&" {
-				b, _ := Z.GetBit(0)
-				Z.SetBit(0, b.Unary('~'))
+				Z.SetBit(0, Z.GetBit(0).Unary('~'))
 			}
 		}
 		return Z
@@ -474,8 +479,7 @@ func (X *Value64) Unary(op string) ValueInterface {
 			Z.SetBit(0, LogicState(uint8(ParityTable256[v])))
 
 			if op == "~^" {
-				b, _ := Z.GetBit(0)
-				Z.SetBit(0, b.Unary('~'))
+				Z.SetBit(0, Z.GetBit(0).Unary('~'))
 			}
 		}
 		return Z
@@ -508,8 +512,7 @@ func (X *ValueBig) Unary(op string) ValueInterface {
 				Z.SetBit(0, Lo)
 			}
 			if op == "~|" {
-				b, _ := Z.GetBit(0)
-				Z.SetBit(0, b.Unary('~'))
+				Z.SetBit(0, Z.GetBit(0).Unary('~'))
 			}
 		}
 		return Z
@@ -526,8 +529,7 @@ func (X *ValueBig) Unary(op string) ValueInterface {
 				Z.SetBit(0, Lo)
 			}
 			if op == "~&" {
-				b, _ := Z.GetBit(0)
-				Z.SetBit(0, b.Unary('~'))
+				Z.SetBit(0, Z.GetBit(0).Unary('~'))
 			}
 		}
 		return Z
@@ -557,8 +559,7 @@ func (X *ValueBig) Unary(op string) ValueInterface {
 			Z.SetBit(0, LogicState(uint8(ParityTable256[v])))
 
 			if op == "~^" {
-				b, _ := Z.GetBit(0)
-				Z.SetBit(0, b.Unary('~'))
+				Z.SetBit(0, Z.GetBit(0).Unary('~'))
 			}
 		}
 		return Z
@@ -596,6 +597,108 @@ func (X *ValueBig) Binary(op string, Y ValueInterface) (Z ValueInterface) {
 	return
 }
 
+func (X *Value1) combine(Y ValueInterface) error {
+	if Y.BitLen() < 1 {
+		return fmt.Errorf("Y has too few bits\n")
+	}
+
+	var Yv LogicState
+	switch Y := Y.(type) {
+	case *Value1:
+		Yv = Y.v
+	default:
+		Yv = Y.GetBit(0)
+	}
+	if X.v == Undefined || Yv == Undefined || X.v != Yv {
+		X.v = Undefined
+	} else if X.v == HiZ && (Yv == Lo || Yv == Hi) {
+		X.v = Yv
+	}
+	return nil
+}
+
+func (X *Value64) combine(Y ValueInterface) error {
+	m := minNumBits(X, Y)
+
+	var Z *Value64
+	switch Y := Y.(type) {
+	case *Value1:
+		z := NewValue(1)
+		z.SetBit(0, X.GetBit(0))
+		z.combine(Y)
+		X.SetBit(0, z.GetBit(0))
+		return nil
+	case *Value64:
+		Z = Y
+	case *ValueBig:
+		Z = Y.GetBitRange(0, m - 1).(*Value64)
+	}
+	
+	mask := uint64(1 << m) - 1
+	// HiZ is just an AND of each HiZ, masked
+	// by the overlapping bits.
+	c := X.hiz & ^mask
+	X.hiz = c | (X.hiz & Z.hiz & mask)
+		
+	// Undef is an OR of the Undefined's plus
+	// any bits that don't match up between the two
+	X.undef |= (Z.undef & mask)
+	X.undef |= ((X.bits ^ Z.bits) & mask)
+		
+	// To compute the actual bit value, we need to
+	// clear any bits that have a HiZ or Undef
+	either := X.hiz | X.undef
+	X.bits &= ^either
+
+	return nil
+}		
+
+func (X *ValueBig) combine(Y ValueInterface) error {
+	//m := minNumBits(X, Y)
+
+	var n *ValueBig
+	switch Y := Y.(type) {
+	case *Value1:
+		z := NewValue(1)
+		z.SetBit(0, X.GetBit(0))
+		z.combine(Y)
+		X.SetBit(0, z.GetBit(0))
+		return nil
+	case *Value64:
+		n = new(ValueBig)
+		n.numBits = Y.numBits
+		n.bits.SetUint64(Y.bits)
+		n.hiz.SetUint64(Y.hiz)
+		n.undef.SetUint64(Y.undef)
+	case *ValueBig:
+		n = Y
+	}
+
+	return nil
+}
+
+func (X *Value1) String() string {
+	s := bytes.NewBufferString("1'b")
+	s.WriteRune(X.v.Rune())
+	return s.String()
+}
+
+func (X *Value64) String() string {
+	s := bytes.NewBufferString(fmt.Sprintf("%d'b", X.numBits))
+	for i := int(X.numBits) - 1; i >= 0; i-- {
+		s.WriteRune(X.GetBit(uint(i)).Rune())
+	}
+	return s.String()
+}
+
+func (X *ValueBig) String() string {
+	s := bytes.NewBufferString(fmt.Sprintf("%d'b", X.numBits))
+	for i := int(X.numBits) - 1; i >= 0; i-- {
+		s.WriteRune(X.GetBit(uint(i)).Rune())
+	}
+	return s.String()
+}
+
 func NewValue(numBits uint) ValueInterface {
 	switch {
 	case numBits == 1:
@@ -615,4 +718,98 @@ func NewValue(numBits uint) ValueInterface {
 	default:
 		return nil
 	}
+}
+
+// Initializes a new Value* based on the contents of s,
+// which must be of the form <size>'<signed><radix>value.
+// size, signed and radix are all optional. If radix is
+// not specified, decimal is assumed.
+func NewValueString(s string) (ValueInterface, error) {
+	size := 0
+	radix := "d"
+	// signed := false
+	value := []rune("0")
+
+	re, _ := regexp.Compile("(?i)(\\d+)?'(s)?([bhod])?(.*)")
+	res := re.FindStringSubmatch(s)
+	if res == nil {
+		return nil, fmt.Errorf("%s is not a valid value string.", s)
+	}
+
+	if len(res[1]) != 0 {
+		size, _ = strconv.Atoi(res[1])
+	}
+	if len(res[2]) != 0 {
+		//signed = true
+	}
+	if len(res[3]) != 0 {
+		radix = strings.ToLower(res[3])
+	}
+		
+	value = []rune(strings.ToLower(strings.Replace(res[4], "_", "", -1)))
+
+	hiz := make([]uint, 0, 1)
+	undef := make([]uint, 0, 1)
+
+	bitsPerRune := 0
+	base := 10
+	switch radix {
+	case "b":
+		bitsPerRune = 1
+		base = 2
+	case "h":
+		bitsPerRune = 4
+		base = 16
+	case "o":
+		bitsPerRune = 3
+		base = 8
+	}
+	for i := len(value) - 1; i >= 0; i-- {
+		bitIndex := (len(value) - i - 1) * bitsPerRune
+		switch value[i] {
+		case 'z':
+			for j := 0; j < bitsPerRune; j++ {
+				hiz = append(hiz, uint(bitIndex+j))
+			}
+			value[i] = '0'
+		case 'x':
+			for j := 0; j < bitsPerRune; j++ {
+				undef = append(undef, uint(bitIndex+j))
+			}
+			value[i] = '0'
+		}
+	}
+
+	p := new(big.Int)
+	if _, ok := p.SetString(string(value), base); !ok {
+		return nil, fmt.Errorf("Couldn't convert %s", s)
+	}
+	numBits := p.BitLen()
+
+	if size == 0 {
+		size = numBits
+	} else {
+		if numBits > size {
+			return nil, fmt.Errorf("Bit length (%d) does not correspond with specified size (%d)", numBits, size)
+		}
+	}
+
+	newVal := NewValue(uint(size))
+	switch newVal := newVal.(type) {
+	case *Value1:
+		newVal.v = LogicState(uint8(p.Bit(0)))
+	case *Value64:
+		newVal.bits = p.Uint64()
+	case *ValueBig:
+		newVal.bits = p
+	}
+
+	for _, h := range hiz {
+		newVal.SetBit(h, HiZ)
+	}
+	for _, u := range undef {
+		newVal.SetBit(u, Undefined)
+	}
+
+	return newVal, nil
 }

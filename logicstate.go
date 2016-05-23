@@ -14,7 +14,7 @@ const (
 	Undefined
 )
 
-
+// This is essentially a wire-OR
 func (A LogicState) Combine(l LogicState) LogicState {
 	if A == l {
 		return A
@@ -27,6 +27,20 @@ func (A LogicState) Combine(l LogicState) LogicState {
 	}
 
 	return Undefined
+}
+
+func (A LogicState) Rune() rune {
+	switch A {
+	case Lo:
+		return '0'
+	case Hi:
+		return '1'
+	case HiZ:
+		return 'z'
+	case Undefined:
+		return 'x'
+	}
+	return 'x'
 }
 
 func (X LogicState) Unary(op rune) LogicState {

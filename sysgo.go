@@ -5,10 +5,10 @@ import (
 )
 
 type DriverInterface interface {
-	GetValue() LogicState
-	GetLastValue() LogicState
+	GetValue() ValueInterface
+	GetLastValue() ValueInterface
 }
 
 type ReceiverInterface interface {
-	SetValue(LogicState)
+	SetValue(ValueInterface)
 }

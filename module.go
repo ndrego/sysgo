@@ -169,21 +169,25 @@ func (A *Module) evalSensitivity(s []*Sensitivity) bool {
 	}
 	
 	for _, sense := range s {
+		v, _ := sense.signal.GetValue().(*Value1)
+		lv, _ := sense.signal.GetLastValue().(*Value1)
+		b := v.GetBit(0)
+		lb := lv.GetBit(0)
 		switch sense.qualifier {
 		case None, Poslevel:
-			if sense.signal.GetValue() == Hi {
+			if b == Hi {
 				return true
 			}
 		case Neglevel:
-			if sense.signal.GetValue() == Lo {
+			if b == Lo {
 				return true
 			}
 		case Posedge:
-			if sense.signal.GetValue() == Hi && sense.signal.GetLastValue() == Lo {
+			if b == Hi && lb == Lo {
 				return true
 			}
 		case Negedge:
-			if sense.signal.GetValue() == Lo && sense.signal.GetLastValue() == Hi {
+			if b == Lo && lb == Hi {
 				return true
 			}
 		}

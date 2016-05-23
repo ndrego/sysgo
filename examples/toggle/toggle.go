@@ -18,7 +18,8 @@ func NewToggleModule() (tm *ToggleModule) {
 
 	init := func(cp *sysgo.SimChanPair) (bool, error){
 		fmt.Printf("Setting clk initial value to 0\n")
-		clk.SetValue(sysgo.Lo)
+		n, _ := sysgo.NewValueString("1'b0")
+		clk.SetValue(n)
 		sysgo.Delay(cp, 100)
 
 		return true, nil // Indicates the sim should finish
@@ -31,7 +32,7 @@ func NewToggleModule() (tm *ToggleModule) {
 		}
 
 		fmt.Printf("clk toggle @ %d: %s\n", sysgo.SimTime(), clk.GetValue())
-		clk.SetValue(clk.GetValue().Unary('~'))
+		clk.SetValue(clk.GetValue().Unary("~"))
 
 		return false, nil
 	}

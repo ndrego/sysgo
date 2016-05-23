@@ -1,7 +1,7 @@
 package sysgo
 
 import (
-
+	"fmt"
 )
 
 type SensitivityQualifier int
@@ -26,9 +26,15 @@ type SensitivityClause struct {
 	sf SensitivitySimFunc
 }
 
-func NewSensitivity(q SensitivityQualifier, sig DriverInterface) (s *Sensitivity) {
+func NewSensitivity(q SensitivityQualifier, sig DriverInterface) (s *Sensitivity, e error) {
+	e = nil
 	s = new(Sensitivity)
 
+	// Type assert that a sensitivity signal should only be a 1-bit item
+	if _, ok := s.signal.GetValue().(*Value1); !ok {
+		e = fmt.Errorf("Multi-bit wires can not be used for sensitivity signals")
+	}
+	
 	s.signal = sig
 	s.qualifier = q
 	return
