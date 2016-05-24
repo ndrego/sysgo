@@ -356,3 +356,76 @@ func TestValueUnaryOps(t *testing.T) {
 	}
 
 }
+
+func TestValueLsh(t *testing.T) {
+	assert := assert.New(t)
+
+	v1, _ := NewValueString("1'b1")
+	v2, _ := NewValueString("1'b0")
+	v3, _ := NewValueString("1'bz")
+	v4, _ := NewValueString("32'hdeadbeef")
+	v5, _ := NewValueString("32'hdxadbeef")
+	v6, _ := NewValueString("128'hdeadbeef")
+
+	assert.Equal("1'b1",                  v1.Lsh(0).Text( 'b'))
+	assert.Equal("2'b10",                 v1.Lsh(1).Text( 'b'))
+	assert.Equal("65'h10000000000000000", v1.Lsh(64).Text('h'))
+
+	assert.Equal("1'b0",                  v2.Lsh(0).Text( 'b'))
+	assert.Equal("2'b00",                 v2.Lsh(1).Text( 'b'))
+	assert.Equal("65'h00000000000000000", v2.Lsh(64).Text('h'))
+
+	assert.Equal("1'bz",                  v3.Lsh(0).Text( 'b'))
+	assert.Equal("2'bz0",                 v3.Lsh(1).Text( 'b'))
+	assert.Equal("65'hz0000000000000000", v3.Lsh(64).Text('h'))
+
+	assert.Equal("32'hdeadbeef",          v4.Lsh(0).Text( 'h'))
+	assert.Equal("33'h1bd5b7dde",         v4.Lsh(1).Text( 'h'))
+	assert.Equal("65'h1bd5b7dde00000000", v4.Lsh(33).Text('h'))
+
+	assert.Equal("32'hdxadbeef",          v5.Lsh(0).Text( 'h'))
+	assert.Equal("33'h1xx5b7dde",         v5.Lsh(1).Text( 'h'))
+	assert.Equal("65'h1xx5b7dde00000000", v5.Lsh(33).Text('h'))
+
+	assert.Equal("128'h000000000000000000000000deadbeef",          v6.Lsh(0).Text( 'h'))
+	assert.Equal("129'h0000000000000000000000001bd5b7dde",         v6.Lsh(1).Text( 'h'))
+	assert.Equal("161'h0000000000000000000000001bd5b7dde00000000", v6.Lsh(33).Text('h'))
+}
+
+func TestValueRsh(t *testing.T) {
+	assert := assert.New(t)
+
+	v1, _ := NewValueString("1'b1")
+	v2, _ := NewValueString("1'b0")
+	v3, _ := NewValueString("1'bz")
+	v4, _ := NewValueString("32'hdeadbeef")
+	v5, _ := NewValueString("32'hdxadbeef")
+	v6, _ := NewValueString("128'hdeadbeef0000000000000000beefdead")
+
+	assert.Equal("1'b1", v1.Rsh(0).Text( 'b'))
+	assert.Equal("1'b0", v1.Rsh(1).Text( 'b'))
+	assert.Equal("1'b0", v1.Rsh(64).Text('b'))
+
+	assert.Equal("1'b0", v2.Rsh(0).Text( 'b'))
+	assert.Equal("1'b0", v2.Rsh(1).Text( 'b'))
+	assert.Equal("1'b0", v2.Rsh(64).Text('b'))
+
+	assert.Equal("1'bz", v3.Rsh(0).Text( 'b'))
+	assert.Equal("1'b0", v3.Rsh(1).Text( 'b'))
+	assert.Equal("1'b0", v3.Rsh(64).Text('b'))
+
+	assert.Equal("32'hdeadbeef", v4.Rsh(0).Text( 'h'))
+	assert.Equal("32'h6f56df77", v4.Rsh(1).Text( 'h'))
+	assert.Equal("32'h00000001", v4.Rsh(31).Text('h'))
+	assert.Equal("32'h00000000", v4.Rsh(33).Text('h'))
+
+	assert.Equal("32'hdxadbeef", v5.Rsh(0).Text( 'h'))
+	assert.Equal("32'h6xx6df77", v5.Rsh(1).Text( 'h'))
+	assert.Equal("32'h00000001", v5.Rsh(31).Text('h'))
+	assert.Equal("32'h00000000", v5.Rsh(33).Text('h'))	
+
+	assert.Equal("128'hdeadbeef0000000000000000beefdead", v6.Rsh(0).Text(  'h'))
+	assert.Equal("128'h6f56df7780000000000000005f77ef56", v6.Rsh(1).Text(  'h'))
+	assert.Equal("128'h0000000000000000deadbeef00000000", v6.Rsh(64).Text( 'h'))
+	assert.Equal("128'h00000000000000000000000000000000", v6.Rsh(129).Text('h'))
+}

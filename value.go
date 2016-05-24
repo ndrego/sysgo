@@ -66,9 +66,14 @@ type ValueInterface interface {
 	GetBitRange(low, high uint) ValueInterface
 	SetBit(uint, LogicState) error
 	SetBitRange(uint, uint, ValueInterface) error
+
+	String() string
 	Text(rune) string
+	
 	Unary(string) ValueInterface
 	Binary(string, ValueInterface) ValueInterface
+	Lsh(uint) ValueInterface
+	Rsh(uint) ValueInterface
 }
 
 func (X *Value1) copy() (Z *Value1) {
@@ -636,6 +641,88 @@ func minNumBits(X, Y ValueInterface) uint {
 	} else {
 		return X.BitLen()
 	}
+}
+
+// Legal operators:
+// Arithmetic: "+", "-", "*", "/", "**", "%"
+// Logical: "&&", "||"
+// Relational: ">", "<", ">=", "<="
+// Equality: "==", "!=", "===", "!=="
+// Bitwise: "&", "|", "^", "(^~ or ~^)"
+// Shift: "<<", ">>", "<<<", ">>>"
+
+func (X *Value1) Lsh(n uint) ValueInterface {
+	if n == uint(0) {
+		return X.copy()
+	}
+	Z := NewValue(n + 1)
+	Z.SetBit(n, X.GetBit(0))
+	return Z
+}
+
+func (X *Value64) Lsh(n uint) ValueInterface {
+	if n == uint(0) {
+		return X.copy()
+	}
+	Z := NewValue(X.numBits + n)
+	switch Z := Z.(type) {
+	case *Value64:
+		Z.bits  = X.bits  << n
+		Z.hiz   = X.hiz   << n
+		Z.undef = X.undef << n
+	case *ValueBig:
+		Z.bits.SetUint64( X.bits)
+		Z.hiz.SetUint64(  X.hiz)
+		Z.undef.SetUint64(X.undef)
+		Z.bits.Lsh( Z.bits,  n)
+		Z.hiz.Lsh(  Z.hiz,   n)
+		Z.undef.Lsh(Z.undef, n)
+	}
+	return Z
+}
+
+func (X *ValueBig) Lsh(n uint) ValueInterface {
+	if n == uint(0) {
+		return X.copy()
+	}
+	Z := X.copy()
+	Z.numBits = X.numBits + n
+	Z.bits.Lsh( Z.bits,  n)
+	Z.hiz.Lsh(  Z.hiz,   n)
+	Z.undef.Lsh(Z.undef, n)
+
+	return Z
+}
+
+func (X *Value1) Rsh(n uint) ValueInterface {
+	if n == uint(0) {
+		return X.copy()
+	}
+	// Right-shifting a 1-bit value always results in 0
+	return NewValue(1)
+}
+
+func (X *Value64) Rsh(n uint) ValueInterface {
+	if n == uint(0) {
+		return X.copy()
+	}
+	Z := X.copy()
+	Z.bits  >>= n
+	Z.hiz   >>= n
+	Z.undef >>= n
+	return Z
+}
+
+func (X *ValueBig) Rsh(n uint) ValueInterface {
+	if n == uint(0) {
+		return X.copy()
+	}
+	Z := X.copy()
+	Z.bits.Rsh( Z.bits,  n)
+	Z.hiz.Rsh(  Z.hiz,   n)
+	Z.undef.Rsh(Z.undef, n)
+
+	return Z
 }
 
 func (X *Value1) Binary(op string, Y ValueInterface) (Z ValueInterface) {
