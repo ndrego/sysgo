@@ -59,7 +59,6 @@ type ValueBig struct {
 
 type ValueInterface interface {
 	BitLen() uint
-	combine(ValueInterface) error
 	Concat(ValueInterface) ValueInterface
 	GetBit(uint) LogicState
 	GetBits([]uint) ValueInterface
@@ -74,6 +73,10 @@ type ValueInterface interface {
 	Binary(string, ValueInterface) ValueInterface
 	Lsh(uint) ValueInterface
 	Rsh(uint) ValueInterface
+
+	// Private methods
+	combine(ValueInterface) error
+	cmpEquality(string, ValueInterface) *Value1
 }
 
 func (X *Value1) copy() (Z *Value1) {
@@ -725,22 +728,122 @@ func (X *ValueBig) Rsh(n uint) ValueInterface {
 	return Z
 }
 
+func (X *Value1) cmpEquality(op string, Y ValueInterface) (Z *Value1) {
+	switch Y := Y.(type) {
+	case *Value1:
+		Z = NewValue(1).(*Value1)
+		switch op {
+		case "==", "!=":
+			if (X.v < HiZ) && (Y.v < HiZ) {
+				if X.v == Y.v {
+					Z.SetBit(0, Hi)
+				}
+			} else {
+				Z.SetBit(0, Undefined)
+			}
+		case "===", "!==":
+			if X.v == Y.v {
+				Z.SetBit(0, Hi)
+			}
+		}
+		if strings.HasPrefix(op, "!") {
+			Z.SetBit(0, Z.GetBit(0).Unary('~'))
+		}
+	default:
+		t := NewValue(Y.BitLen())
+		t.SetBit(0, X.GetBit(0))
+		Z = t.cmpEquality(op, Y)
+	}
+	return
+}
+
+func (X *Value64) cmpEquality(op string, Y ValueInterface) (Z *Value1) {
+	switch Y := Y.(type) {
+	case *Value1:
+		// Equality is symmetric so just flip and return
+		Z = Y.cmpEquality(op, X)
+	case *Value64:
+		Z = NewValue(1).(*Value1)
+		switch op {
+		case "==", "!=":
+			if X.hiz != 0 || Y.hiz != 0 || X.undef != 0 || Y.undef != 0 {
+				Z.SetBit(0, Undefined)
+			} else {
+				if X.bits == Y.bits {
+					Z.SetBit(0, Hi)
+				}
+			}
+		case "===", "!==":
+			if X.bits == Y.bits && X.hiz == Y.hiz && X.undef == Y.undef {
+				Z.SetBit(0, Hi)
+			}
+		}
+		if strings.HasPrefix(op, "!") {
+			Z.SetBit(0, Z.GetBit(0).Unary('~'))
+		}
+	case *ValueBig:
+		// Convert this to a ValueBig and then do the comparison
+		t := NewValue(Y.BitLen()).(*ValueBig)
+		t.bits.SetUint64(X.bits)
+		t.hiz.SetUint64(X.hiz)
+		t.undef.SetUint64(X.undef)
+		Z = t.cmpEquality(op, Y)
+	}
+	return
+}
+
+func (X *ValueBig) cmpEquality(op string, Y ValueInterface) (Z *Value1) {
+	switch Y := Y.(type) {
+	case *Value1, *Value64:
+		Z = Y.cmpEquality(op, X)
+	case *ValueBig:
+		zero := new(big.Int)
+		Z = NewValue(1).(*Value1)
+		switch op {
+		case "==", "!=":
+			if X.hiz.Cmp(zero) != 0 || Y.hiz.Cmp(zero) != 0 || X.undef.Cmp(zero) != 0 || Y.undef.Cmp(zero) != 0 {
+				Z.SetBit(0, Undefined)
+			} else {
+				if X.bits.Cmp(Y.bits) == 0 {
+					Z.SetBit(0, Hi)
+				}
+			}
+		case "===", "!==":
+			if X.bits.Cmp(Y.bits) == 0 && X.hiz.Cmp(Y.hiz) == 0 && X.undef.Cmp(Y.undef) == 0 {
+				Z.SetBit(0, Hi)
+			}
+		}
+		if strings.HasPrefix(op, "!") {
+			Z.SetBit(0, Z.GetBit(0).Unary('~'))
+		}
+	}
+	return
+}
+
 func (X *Value1) Binary(op string, Y ValueInterface) (Z ValueInterface) {
+	switch op {
+	case "==", "!=", "===", "!==":
+		// Equality operators
+		Z = X.cmpEquality(op, Y)
+	}
 	return
 }
 
 func (X *Value64) Binary(op string, Y ValueInterface) (Z ValueInterface) {	
 	switch op {
-	case "&":
-		//Z := NewValue(minNumBits(X, Y))
-		
-	case "+":
+	case "==", "!=", "===", "!==":
+		// Equality operators
+		Z = X.cmpEquality(op, Y)		
 	}
-
 	return
 }
 
 func (X *ValueBig) Binary(op string, Y ValueInterface) (Z ValueInterface) {
+	switch op {
+	case "==", "!=", "===", "!==":
+		// Equality operators
+		Z = X.cmpEquality(op, Y)
+	}
 	return
 }
 
