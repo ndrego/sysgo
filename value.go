@@ -77,6 +77,7 @@ type ValueInterface interface {
 	// Private methods
 	combine(ValueInterface) error
 	cmpEquality(string, ValueInterface) *Value1
+	cmpRelational(string, ValueInterface) *Value1
 }
 
 func (X *Value1) copy() (Z *Value1) {
@@ -101,6 +102,93 @@ func (X *ValueBig) copy() (Z *ValueBig) {
 	Z.undef.SetBytes(X.undef.Bytes())
 
 	return
+}
+
+// Helper conversion functions
+func (X *Value1) toValue64(numBits uint) (Y *Value64) {
+	Y = new(Value64)
+	if numBits == 0 {
+		Y.numBits = 1
+	} else {
+		Y.numBits = numBits
+	}
+	switch X.v {
+	case Lo, Hi:
+		Y.bits = uint64(X.v)
+	case HiZ:
+		Y.hiz = uint64(1)
+	case Undefined:
+		Y.undef = uint64(1)
+	}
+	return
+}
+
+func (X *Value1) toValueBig(numBits uint) (Y *ValueBig) {
+	Y = new(ValueBig)
+	if numBits == 0 {
+		Y.numBits = 1
+	} else {
+		Y.numBits = numBits
+	}
+	Y.bits = new(big.Int)
+	Y.hiz = new(big.Int)
+	Y.undef = new(big.Int)
+	switch X.v {
+	case Lo, Hi:
+		Y.bits.SetBit(Y.bits, 0, uint(X.v))
+	case HiZ:
+		Y.hiz.SetBit(Y.hiz, 0, uint(1))
+	case Undefined:
+		Y.undef.SetBit(Y.undef, 0, uint(1))
+	}
+	return
+}
+
+func (X *Value64) toValue1() (Y *Value1) {
+	Y = new(Value1)
+	Y.v = X.GetBit(0)
+	return
+}
+
+func (X *Value64) toValueBig(numBits uint) (Y *ValueBig) {
+	Y = new(ValueBig)	
+	if numBits == 0 {
+		Y.numBits = X.numBits
+	} else {
+		Y.numBits = numBits
+	}
+	Y.bits = new(big.Int)
+	Y.hiz = new(big.Int)
+	Y.undef = new(big.Int)
+	Y.bits.SetUint64(X.bits)
+	Y.hiz.SetUint64(X.hiz)
+	Y.undef.SetUint64(X.undef)
+	return
+}
+
+// Returns a new Value1 object with only the 0th bit
+// of X.
+func (X *ValueBig) toValue1() (Y *Value1) {
+	Y = new(Value1)
+	Y.v = X.GetBit(0)
+	return
+}
+
+// Returns a new Value64 object with only the lower
+// 64 bits (0-63) of X.
+func (X *ValueBig) toValue64(numBits uint) (Y *Value64) {
+	m := uint(0)
+	if numBits == 0 {
+		if X.numBits > 64 {
+			m = 64
+		} else {
+			m = X.numBits
+		}
+	} else {
+		m = numBits
+	}
+			
+	return X.GetBitRange(0, m).(*Value64)
 }
 
 func (X *Value1) BitLen() uint {
@@ -363,27 +451,11 @@ func (X *Value64) SetBitRange(low, high uint, v ValueInterface) error {
 	var n *Value64
 	switch v := v.(type) {
 	case *Value1:
-		n = new(Value64)
-		n.numBits = 1
-		switch v.v {
-		case Lo, Hi:
-			n.bits = uint64(v.v)
-		case HiZ:
-			n.hiz = uint64(1)
-		case Undefined:
-			n.undef = uint64(1)
-		}
+		n = v.toValue64(numBits)
 	case *Value64:
 		n = v
 	case *ValueBig:
-		m := new(big.Int)
-		t := new(big.Int)
-		m.SetUint64(uint64(1 << 64 - 1))
-		n = new(Value64)
-		n.numBits = v.BitLen()
-		n.bits  = t.And(m, v.bits).Uint64()
-		n.hiz   = t.And(m, v.hiz).Uint64()
-		n.undef = t.And(m, v.undef).Uint64()
+		n = v.toValue64(numBits)
 	}
 	X.bits  = (X.bits  & ^mask) | ((n.bits  << low) & mask)
 	X.hiz   = (X.hiz   & ^mask) | ((n.hiz   << low) & mask)
@@ -413,26 +485,9 @@ func (X *ValueBig) SetBitRange(low, high uint, v ValueInterface) error {
 	var n *ValueBig
 	switch v := v.(type) {
 	case *Value1:
-		n = new(ValueBig)
-		n.bits = new(big.Int)
-		n.hiz = new(big.Int)
-		n.undef = new(big.Int)
-		switch v.v {
-		case Lo, Hi:
-			n.bits.SetBit(n.bits, 0, uint(v.v))
-		case HiZ:
-			n.hiz.SetBit(n.hiz, 0, uint(1))
-		case Undefined:
-			n.undef.SetBit(n.undef, 0, uint(1))
-		}
+		n = v.toValueBig(X.numBits)
 	case *Value64:
-		n = new(ValueBig)
-		n.bits = new(big.Int)
-		n.hiz = new(big.Int)
-		n.undef = new(big.Int)
-		n.bits.SetUint64(v.bits)
-		n.hiz.SetUint64(v.hiz)
-		n.undef.SetUint64(v.undef)
+		n = v.toValueBig(X.numBits)
 	case *ValueBig:
 		n = v
 	}
@@ -749,10 +804,10 @@ func (X *Value1) cmpEquality(op string, Y ValueInterface) (Z *Value1) {
 		if strings.HasPrefix(op, "!") {
 			Z.SetBit(0, Z.GetBit(0).Unary('~'))
 		}
-	default:
-		t := NewValue(Y.BitLen())
-		t.SetBit(0, X.GetBit(0))
-		Z = t.cmpEquality(op, Y)
+	case *Value64:
+		Z = X.toValue64(Y.BitLen()).cmpEquality(op, Y)
+	case *ValueBig:
+		Z = X.toValue64(Y.BitLen()).cmpEquality(op, Y)
 	}
 	return
 }
@@ -783,11 +838,7 @@ func (X *Value64) cmpEquality(op string, Y ValueInterface) (Z *Value1) {
 		}
 	case *ValueBig:
 		// Convert this to a ValueBig and then do the comparison
-		t := NewValue(Y.BitLen()).(*ValueBig)
-		t.bits.SetUint64(X.bits)
-		t.hiz.SetUint64(X.hiz)
-		t.undef.SetUint64(X.undef)
-		Z = t.cmpEquality(op, Y)
+		Z = X.toValueBig(Y.BitLen()).cmpEquality(op, Y)
 	}
 	return
 }
@@ -820,11 +871,126 @@ func (X *ValueBig) cmpEquality(op string, Y ValueInterface) (Z *Value1) {
 	return
 }
 
+func (X *Value1) cmpRelational(op string, Y ValueInterface) (Z *Value1) {
+	switch Y := Y.(type) {
+	case *Value1:
+		Z = NewValue(1).(*Value1)
+		if (X.v < HiZ) && (Y.v < HiZ) {
+			switch op {
+			case "<":
+				if X.v < Y.v {
+					Z.SetBit(0, Hi)
+				}
+			case "<=":
+				if X.v <= Y.v {
+					Z.SetBit(0, Hi)
+				}
+			case ">":
+				if X.v > Y.v {
+					Z.SetBit(0, Hi)
+				}
+			case ">=":
+				if X.v >= Y.v {
+					Z.SetBit(0, Hi)
+				}
+			}
+		} else {
+			Z.SetBit(0, Undefined)
+		}
+	case *Value64:
+		Z = X.toValue64(Y.BitLen()).cmpRelational(op, Y)
+	case *ValueBig:
+		Z = X.toValueBig(Y.BitLen()).cmpRelational(op, Y)
+	}
+	return
+}
+
+func (X *Value64) cmpRelational(op string, Y ValueInterface) (Z *Value1) {
+	var n *Value64
+	switch Y := Y.(type) {
+	case *Value1:
+		n = Y.toValue64(X.numBits)
+	case *Value64:
+		n = Y
+	case *ValueBig:
+		Z = X.toValueBig(Y.BitLen()).cmpRelational(op, Y)
+		return
+	}
+	Z = NewValue(1).(*Value1)
+	
+	if X.hiz != 0 || n.hiz != 0 || X.undef != 0 || n.undef != 0 {
+		Z.SetBit(0, Undefined)
+	} else {
+		switch op {
+		case "<":
+			if X.bits < n.bits {
+				Z.SetBit(0, Hi)
+			}
+		case "<=":
+			if X.bits <= n.bits {
+				Z.SetBit(0, Hi)
+			}
+		case ">":
+			if X.bits > n.bits {
+				Z.SetBit(0, Hi)
+			}
+		case ">=":
+			if X.bits >= n.bits {
+				Z.SetBit(0, Hi)
+			}
+		}
+	}
+	return
+}
+
+func (X *ValueBig) cmpRelational(op string, Y ValueInterface) (Z *Value1) {
+	var n *ValueBig
+	switch Y := Y.(type) {
+	case *Value1:
+		n = Y.toValueBig(X.numBits)
+	case *Value64:
+		n = Y.toValueBig(X.numBits)
+	case *ValueBig:
+		n = Y
+	}
+	Z = NewValue(1).(*Value1)
+
+	zero := new(big.Int)
+	if X.hiz.Cmp(zero) != 0 || n.hiz.Cmp(zero) != 0 || X.undef.Cmp(zero) != 0 || n.undef.Cmp(zero) != 0 {
+		Z.SetBit(0, Undefined)
+	} else {
+		res := X.bits.Cmp(n.bits)
+		switch op {
+		case "<":
+			if res == -1 {
+				Z.SetBit(0, Hi)
+			}
+		case "<=":
+			if res <= 0 {
+				Z.SetBit(0, Hi)
+			}
+		case ">":
+			if res == 1 {
+				Z.SetBit(0, Hi)
+			}
+		case ">=":
+			if res >= 0 {
+				Z.SetBit(0, Hi)
+			}
+		}
+	}
+	return
+}
+
+
 func (X *Value1) Binary(op string, Y ValueInterface) (Z ValueInterface) {
 	switch op {
 	case "==", "!=", "===", "!==":
 		// Equality operators
 		Z = X.cmpEquality(op, Y)
+	case "<", "<=", ">", ">=":
+		// Relational operators
+		Z = X.cmpRelational(op, Y)
 	}
 	return
 }
@@ -833,7 +999,10 @@ func (X *Value64) Binary(op string, Y ValueInterface) (Z ValueInterface) {
 	switch op {
 	case "==", "!=", "===", "!==":
 		// Equality operators
-		Z = X.cmpEquality(op, Y)		
+		Z = X.cmpEquality(op, Y)
+	case "<", "<=", ">", ">=":
+		// Relational operators
+		Z = X.cmpRelational(op, Y)		
 	}
 	return
 }
@@ -843,6 +1012,9 @@ func (X *ValueBig) Binary(op string, Y ValueInterface) (Z ValueInterface) {
 	case "==", "!=", "===", "!==":
 		// Equality operators
 		Z = X.cmpEquality(op, Y)
+	case "<", "<=", ">", ">=":
+		// Relational operators
+		Z = X.cmpRelational(op, Y)		
 	}
 	return
 }
