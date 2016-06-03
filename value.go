@@ -73,11 +73,17 @@ type ValueInterface interface {
 	Binary(string, ValueInterface) ValueInterface
 	Lsh(uint) ValueInterface
 	Rsh(uint) ValueInterface
+	IsZero() bool
+	HasHiz() bool
+	HasUndef() bool
 
 	// Private methods
 	combine(ValueInterface) error
 	cmpEquality(string, ValueInterface) *Value1
 	cmpRelational(string, ValueInterface) *Value1
+	binLogical(string, ValueInterface) *Value1
+	binBitwise(string, ValueInterface) ValueInterface
+	// binArithmetic(string, ValueInterface) ValueInterface
 }
 
 func (X *Value1) copy() (Z *Value1) {
@@ -313,13 +319,19 @@ func (X *Value64) GetBitRange(low, high uint) ValueInterface {
 		return nil 
 	}
 	newNumBits := high - low + 1
-	Z := NewValue(newNumBits).(*Value64)
-	mask := uint64(1 << newNumBits) - 1
-	Z.bits = (X.bits >> low) & mask
-	Z.hiz = (X.hiz >> low) & mask
-	Z.undef = (X.undef >> low) & mask
 
-	return Z
+	if newNumBits == 1 {
+		Z := NewValue(1).(*Value1)
+		Z.SetBit(0, X.GetBit(low))
+		return Z
+	} else {
+		Z := NewValue(newNumBits).(*Value64)
+		mask := uint64(1 << newNumBits) - 1
+		Z.bits = (X.bits >> low) & mask
+		Z.hiz = (X.hiz >> low) & mask
+		Z.undef = (X.undef >> low) & mask
+		return Z
+	}
 }
 
 func (X *ValueBig) GetBitRange(low, high uint) ValueInterface {
@@ -335,7 +347,11 @@ func (X *ValueBig) GetBitRange(low, high uint) ValueInterface {
 		return nil
 	}
 	newNumBits := high - low + 1
-	if newNumBits <= 64 {
+	if newNumBits == 1 {
+		Z := NewValue(1).(*Value1)
+		Z.SetBit(0, X.GetBit(low))
+		return Z
+	} else if newNumBits <= 64 {
 		t := new(big.Int)
 		Z := NewValue(newNumBits).(*Value64)
 		mask := uint64(1 << newNumBits) - 1
@@ -538,22 +554,17 @@ func (X *Value64) Unary(op string) ValueInterface {
 	switch op {
 	case "~":
 		Z := X.copy()
-		Z.bits = ^Z.bits & mask
+		Z.bits = mask &^ Z.bits &^ (Z.hiz | Z.undef)
 		return Z
 	case "|", "~|":
 		Z := NewValue(1)
-		if X.hiz & mask != 0 || X.undef & mask != 0 {
+		if X.bits & mask != 0 {
+			Z.SetBit(0, Hi)
+		} else if X.hiz & mask != 0 || X.undef & mask != 0 {
 			Z.SetBit(0, Undefined)
-		} else {
-			if X.bits & mask != 0 {
-				Z.SetBit(0, Hi)
-			} else {
-				Z.SetBit(0, Lo)
-			}
-
-			if op == "~|" {
-				Z.SetBit(0, Z.GetBit(0).Unary('~'))
-			}
+		}
+		if op == "~|" {
+			Z.SetBit(0, Z.GetBit(0).Unary('~'))
 		}
 		return Z
 	case "&", "~&":
@@ -563,10 +574,7 @@ func (X *Value64) Unary(op string) ValueInterface {
 		} else {
 			if X.bits == mask {
 				Z.SetBit(0, Hi)
-			} else {
-				Z.SetBit(0, Lo)
 			}
-
 			if op == "~&" {
 				Z.SetBit(0, Z.GetBit(0).Unary('~'))
 			}
@@ -621,21 +629,21 @@ func (X *ValueBig) Unary(op string) ValueInterface {
 	switch op {
 	case "~":
 		Z := X.copy()
-		Z.bits.Not(Z.bits)
+		var m, t1 big.Int
+		one := big.NewInt(int64(1))
+		m.Sub(m.Lsh(one, uint(X.numBits)), one)
+		t1.Or(Z.hiz, Z.undef)
+		Z.bits.AndNot(Z.bits.Not(Z.bits), &t1).And(Z.bits, &m)
 		return Z
 	case "|", "~|":
 		Z := NewValue(1)
-		if X.hiz.Cmp(&zero) != 0 || X.undef.Cmp(&zero) != 0 {
+		if X.bits.Cmp(&zero) != 0 {
+			Z.SetBit(0, Hi)
+		} else if X.hiz.Cmp(&zero) != 0 || X.undef.Cmp(&zero) != 0 {
 			Z.SetBit(0, Undefined)
-		} else {
-			if X.bits.Cmp(&zero) != 0 {
-				Z.SetBit(0, Hi)
-			} else {
-				Z.SetBit(0, Lo)
-			}
-			if op == "~|" {
-				Z.SetBit(0, Z.GetBit(0).Unary('~'))
-			}
+		}
+		if op == "~|" {
+			Z.SetBit(0, Z.GetBit(0).Unary('~'))
 		}
 		return Z
 	case "&", "~&":
@@ -648,8 +656,6 @@ func (X *ValueBig) Unary(op string) ValueInterface {
 			mask.Sub(mask.Lsh(one, uint(X.numBits)), one)
 			if X.bits.Cmp(mask) == 0 {
 				Z.SetBit(0, Hi)
-			} else {
-				Z.SetBit(0, Lo)
 			}
 			if op == "~&" {
 				Z.SetBit(0, Z.GetBit(0).Unary('~'))
@@ -708,6 +714,7 @@ func minNumBits(X, Y ValueInterface) uint {
 // Equality: "==", "!=", "===", "!=="
 // Bitwise: "&", "|", "^", "(^~ or ~^)"
 // Shift: "<<", ">>", "<<<", ">>>"
+// http://web.engr.oregonstate.edu/~traylor/ece474/lecture_verilog/beamer/verilog_operators.pdf
 
 func (X *Value1) Lsh(n uint) ValueInterface {
 	if n == uint(0) {
@@ -982,6 +989,223 @@ func (X *ValueBig) cmpRelational(op string, Y ValueInterface) (Z *Value1) {
 	return
 }
 
+// Returns true iff X == 0. If X = (Hi | HiZ | Undefined), returns false.
+func (X *Value1) IsZero() bool {
+	return X.v == Lo
+}
+
+// Returns true iff X == 0. If X = has any non-zero bits (including HiZ or
+// Undefined) the return value is false.
+func (X *Value64) IsZero() bool {
+	return X.bits == uint64(0) && X.hiz == uint64(0) && X.undef == uint64(0)
+}
+
+// Returns true iff X == 0. If X = has any non-zero bits (including HiZ or
+// Undefined) the return value is false.
+func (X *ValueBig) IsZero() bool {
+	var z big.Int
+	return X.bits.Cmp(&z) == 0 && X.hiz.Cmp(&z) == 0 && X.undef.Cmp(&z) == 0
+}
+
+func (X *Value1) HasHiz() bool {
+	return X.v == HiZ
+}
+
+func (X *Value64) HasHiz() bool {
+	return X.hiz != 0
+}
+
+func (X *ValueBig) HasHiz() bool {
+	var z big.Int
+	return X.hiz.Cmp(&z) != 0
+}
+
+func (X *Value1) HasUndef() bool {
+	return X.v == Undefined
+}
+
+func (X *Value64) HasUndef() bool {
+	return X.undef != 0
+}
+
+func (X *ValueBig) HasUndef() bool {
+	var z big.Int
+	return X.undef.Cmp(&z) != 0
+}
+
+// Computes logical-AND and logical-OR. So:
+// Z = X && Y returns 1'b1 if both X and Y are non-zero and 1'b0 otherwise
+// Z = X || Y returns 1'b1 if either X or Y are non-zero
+func (X *Value1) binLogical(op string, Y ValueInterface) (Z *Value1) {
+	Z = NewValue(1).(*Value1)
+	Yv := Y.GetBit(0)
+
+	switch op {
+	case "&&":
+		if X.v > Hi || Yv > Hi {
+			Z.SetBit(0, Undefined)
+		} else {		
+			if X.v == Hi && Yv == Hi {
+				Z.SetBit(0, Hi)
+			}
+		}
+	case "||":
+		if X.v == Hi || Yv == Hi {
+			Z.SetBit(0, Hi)
+		} else if X.v > Hi || Yv > Hi {
+			Z.SetBit(0, Undefined)
+		}
+	}
+	return
+}
+
+// Computes logical-AND and logical-OR. So:
+// Z = X && Y returns 1'b1 if both X and Y are non-zero and 1'b0 otherwise
+// Z = X || Y returns 1'b1 if either X or Y are non-zero
+func (X *Value64) binLogical(op string, Y ValueInterface) (Z *Value1) {
+	Xor := X.Unary("|").(*Value1)
+	Yor := Y.Unary("|").(*Value1)
+	
+	Z = Xor.binLogical(op, Yor)
+	return
+}
+
+// Computes logical-AND and logical-OR. So:
+// Z = X && Y returns 1'b1 if both X and Y are non-zero and 1'b0 otherwise
+// Z = X || Y returns 1'b1 if either X or Y are non-zero
+func (X *ValueBig) binLogical(op string, Y ValueInterface) (Z *Value1) {
+	Xor := X.Unary("|").(*Value1)
+	Yor := Y.Unary("|").(*Value1)
+
+	Z = Xor.binLogical(op, Yor)
+	return
+}
+
+func (X *Value1) binBitwise(op string, Y ValueInterface) ValueInterface {
+	switch Y := Y.(type) {
+	case *Value1:
+		Z := NewValue(1)
+		switch op {
+		case "&":
+			if X.v > Hi || Y.v > Hi {
+				Z.SetBit(0, Undefined)
+			} else {
+				if X.v == Hi && Y.v == Hi {
+					Z.SetBit(0, Hi)
+				}
+			}
+		case "|":
+			if X.v == Hi || Y.v == Hi {
+				Z.SetBit(0, Hi)
+			} else if X.v > Hi || Y.v > Hi {
+				Z.SetBit(0, Undefined)
+			}
+		case "^", "^~", "~^":
+			if X.v > Hi || Y.v > Hi {
+				Z.SetBit(0, Undefined)
+			} else {
+				if (X.v == Hi && Y.v == Lo) || (X.v == Lo && Y.v == Hi) {
+					Z.SetBit(0, Hi)
+				}
+				if strings.ContainsRune(op, '~') {
+					Z.SetBit(0, Z.GetBit(0).Unary('~'))
+				}
+			}
+		}
+		return Z		
+	case *Value64:
+		return X.toValue64(Y.BitLen()).binBitwise(op, Y)
+	case *ValueBig:
+		return X.toValueBig(Y.BitLen()).binBitwise(op, Y)
+	default:
+		return nil
+	}
+}
+
+func (X *Value64) binBitwise(op string, Y ValueInterface) ValueInterface {
+	var n *Value64
+	switch Y := Y.(type) {
+	case *Value1:
+		n = Y.toValue64(X.BitLen())
+	case *Value64:
+		n = Y
+	case *ValueBig:
+		return X.toValueBig(Y.BitLen()).binBitwise(op, Y)
+	}
+
+	numBits := X.numBits
+	if n.numBits > X.numBits {
+		numBits = n.numBits
+	}
+	Z := NewValue(numBits).(*Value64)
+
+	switch op {
+	case "&":
+		t1 := X.hiz | X.undef
+		t2 := n.hiz | n.undef
+		Z.undef = (t1 & n.bits) | (t2 & X.bits) | (t1 & t2)
+		Z.bits  = (X.bits & n.bits) &^ Z.undef
+	case "|":
+		t1 := X.hiz | X.undef
+		t2 := n.hiz | n.undef
+		Z.bits  = X.bits | n.bits
+		Z.undef = (t1 &^ n.bits) | (t2 &^ X.bits) | (t1 & t2)
+	case "^", "^~", "~^":
+		Z.undef = X.undef | n.undef | X.hiz | n.hiz
+		Z.bits  = (X.bits ^ n.bits) &^ Z.undef
+		if strings.ContainsRune(op, '~') {
+			Z = Z.Unary("~").(*Value64)
+		}
+	}
+	return Z
+}
+
+func (X *ValueBig) binBitwise(op string, Y ValueInterface) ValueInterface {
+	var n *ValueBig
+	switch Y := Y.(type) {
+	case *Value1:
+		n = Y.toValueBig(X.BitLen())
+	case *Value64:
+		n = Y.toValueBig(X.BitLen())
+	case *ValueBig:
+		n = Y
+	}
+
+	numBits := X.numBits
+	if n.numBits > X.numBits {
+		numBits = n.numBits
+	}
+	Z := NewValue(numBits).(*ValueBig)
+
+	switch op {
+	case "&":
+		var t1, t2, t3, t4, t5 big.Int
+		t1.Or(X.hiz, X.undef)
+		t2.Or(n.hiz, n.undef)
+		t3.And(&t1, n.bits)
+		t4.And(&t2, X.bits)
+		t5.And(&t1, &t2)
+		Z.undef.Or(&t3, &t4).Or(Z.undef, &t5)
+		Z.bits.And(X.bits, n.bits).AndNot(Z.bits, Z.undef)
+	case "|":
+		var t1, t2, t3, t4, t5 big.Int
+		t1.Or(X.hiz, X.undef)
+		t2.Or(n.hiz, n.undef)
+		Z.bits.Or(X.bits, n.bits)
+		t3.AndNot(&t1, n.bits)
+		t4.AndNot(&t2, X.bits)
+		t5.And(&t1, &t2)
+		Z.undef.Or(&t3, &t4).Or(Z.undef, &t5)
+	case "^", "^~", "~^":
+		Z.undef.Or(X.undef, n.undef).Or(Z.undef, X.hiz).Or(Z.undef, n.hiz)
+		Z.bits.Xor(X.bits, n.bits).AndNot(Z.bits, Z.undef)
+		if strings.ContainsRune(op, '~') {
+			Z = Z.Unary("~").(*ValueBig)
+		}
+	}
+	return Z
+	
+}
 
 func (X *Value1) Binary(op string, Y ValueInterface) (Z ValueInterface) {
 	switch op {
@@ -991,6 +1215,15 @@ func (X *Value1) Binary(op string, Y ValueInterface) (Z ValueInterface) {
 	case "<", "<=", ">", ">=":
 		// Relational operators
 		Z = X.cmpRelational(op, Y)
+	case "&&", "||":
+		// Logical operators
+		Z = X.binLogical(op, Y)
+	case "&", "|", "^", "^~", "~^":
+		// Bitwise operators
+		Z = X.binBitwise(op, Y)
+	default:
+		fmt.Printf("WARNING: %s is not a defined operator, returning Undefined.\n", op)
+		Z, _ = NewValueString("1'bx")		
 	}
 	return
 }
@@ -1002,7 +1235,16 @@ func (X *Value64) Binary(op string, Y ValueInterface) (Z ValueInterface) {
 		Z = X.cmpEquality(op, Y)
 	case "<", "<=", ">", ">=":
 		// Relational operators
-		Z = X.cmpRelational(op, Y)		
+		Z = X.cmpRelational(op, Y)
+	case "&&", "||":
+		// Logical operators
+		Z = X.binLogical(op, Y)
+	case "&", "|", "^", "^~", "~^":
+		// Bitwise operators
+		Z = X.binBitwise(op, Y)
+	default:
+		fmt.Printf("WARNING: %s is not a defined operator, returning Undefined.\n", op)
+		Z, _ = NewValueString("1'bx")		
 	}
 	return
 }
@@ -1014,7 +1256,16 @@ func (X *ValueBig) Binary(op string, Y ValueInterface) (Z ValueInterface) {
 		Z = X.cmpEquality(op, Y)
 	case "<", "<=", ">", ">=":
 		// Relational operators
-		Z = X.cmpRelational(op, Y)		
+		Z = X.cmpRelational(op, Y)
+	case "&&", "||":
+		// Logical operators
+		Z = X.binLogical(op, Y)
+	case "&", "|", "^", "^~", "~^":
+		// Bitwise operators
+		Z = X.binBitwise(op, Y)
+	default:
+		fmt.Printf("WARNING: %s is not a defined operator, returning Undefined.\n", op)
+		Z, _ = NewValueString("1'bx")		
 	}
 	return
 }

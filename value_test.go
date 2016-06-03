@@ -9,6 +9,20 @@ import (
 	"testing"
 )
 
+type binaryTest struct {
+	exp LogicState
+	op1 ValueInterface
+	op string
+	op2 ValueInterface
+}
+
+func runBinaryTests(t *testing.T, tests []binaryTest) {
+	assert := assert.New(t)
+	for _, test := range tests {
+		assert.Equal(test.exp, test.op1.Binary(test.op, test.op2).GetBit(0), "Exp = %s, %s %s %s\n", test.exp, test.op1, test.op, test.op2)
+	}
+}
+
 func TestNewValueString(t *testing.T) {
 	assert := assert.New(t)
 	
@@ -432,8 +446,6 @@ func TestValueRsh(t *testing.T) {
 }
 
 func TestValueCmpEquality(t *testing.T) {
-	assert := assert.New(t)
-
 	a := NewValue(1)
 	b, _ := NewValueString("1'b1")
 	c, _ := NewValueString("1'b0")
@@ -453,51 +465,49 @@ func TestValueCmpEquality(t *testing.T) {
 	k = k.Lsh(32)
 	l = l.Lsh(32)
 
-	assert.Equal(Hi,        a.Binary("==",  c).GetBit(0))
-	assert.Equal(Lo,        a.Binary("==",  b).GetBit(0))
-	assert.Equal(Hi,        a.Binary("!=",  b).GetBit(0))
-	assert.Equal(Lo,        a.Binary("!=",  c).GetBit(0))
-	assert.Equal(Undefined, a.Binary("==",  d).GetBit(0))
-	assert.Equal(Undefined, a.Binary("!=",  d).GetBit(0))
-	assert.Equal(Undefined, d.Binary("==",  e).GetBit(0))
-	assert.Equal(Lo,        d.Binary("===", e).GetBit(0))
-	assert.Equal(Hi,        d.Binary("!==", e).GetBit(0))
+	runBinaryTests(t, []binaryTest{
+		{Hi,        a, "==",  c},
+		{Lo,        a, "==",  b},
+		{Hi,        a, "!=",  b},
+		{Lo,        a, "!=",  c},
+		{Undefined, a, "==",  d},
+		{Undefined, a, "!=",  d},
+		{Undefined, d, "==",  e},
+		{Lo,        d, "===", e},
+		{Hi,        d, "!==", e},
+		{Hi,        b, "==",  h},
+		{Lo,        c, "==",  h},
+		{Hi,        c, "!=",  h},
+		{Hi,        f, "==",  f},
+		{Undefined, f, "==",  g},
+		{Lo,        f, "!=",  f},
+		{Undefined, f, "!=",  g},
+		{Undefined, g, "==",  i},
+		{Undefined, i, "==",  g},
+		{Undefined, g, "!=",  i},
+		{Lo,        i, "===", g},
+		{Hi,        i, "!==", g},
+		{Hi,        i, "===", j},
+		{Hi,        k, "==",  l},
+		{Hi,        l, "==",  k},
+		{Lo,        k, "!=",  l},
+		{Hi,        k, "!=",  f},
+		{Undefined, k, "!=",  g},
+		{Hi,        m, "==",  k.Rsh(32)},
+		{Hi,        n, "==",  b},
+		{Undefined, o, "==",  g},
+		{Undefined, g, "==",  o},
+		{Hi,        o, "===", g},
+		{Lo,        o, "!==", g},
+		{Hi,        g, "===", o},
+		{Lo,        g, "!==", o},
+		{Hi,        i, "!==", o},
+		{Lo,        i, "===", o},
+	})
 
-	assert.Equal(Hi,        b.Binary("==",  h).GetBit(0))
-	assert.Equal(Lo,        c.Binary("==",  h).GetBit(0))
-	assert.Equal(Hi,        c.Binary("!=",  h).GetBit(0))
-	assert.Equal(Hi,        f.Binary("==",  f.(*Value64).copy()).GetBit(0))
-	assert.Equal(Undefined, f.Binary("==",  g).GetBit(0))
-	assert.Equal(Lo,        f.Binary("!=",  f.(*Value64).copy()).GetBit(0))
-	assert.Equal(Undefined, f.Binary("!=",  g).GetBit(0))
-	assert.Equal(Undefined, g.Binary("==",  i).GetBit(0))
-	assert.Equal(Undefined, i.Binary("==",  g).GetBit(0))
-	assert.Equal(Undefined, g.Binary("!=",  i).GetBit(0))
-	assert.Equal(Lo,        i.Binary("===", g).GetBit(0))
-	assert.Equal(Hi,        i.Binary("!==", g).GetBit(0))
-	assert.Equal(Hi,        i.Binary("===", j).GetBit(0))
-
-	assert.Equal(Hi,        k.Binary("==",  l).GetBit(0))
-	assert.Equal(Hi,        l.Binary("==",  k).GetBit(0))
-	assert.Equal(Lo,        k.Binary("!=",  l).GetBit(0))
-	assert.Equal(Hi,        k.Binary("!=",  f).GetBit(0))
-	assert.Equal(Undefined, k.Binary("!=",  g).GetBit(0))
-	assert.Equal(Hi,        m.Binary("==",  k.Rsh(32)).GetBit(0))
-	assert.Equal(Hi,        n.Binary("==",  b).GetBit(0))
-	assert.Equal(Undefined, o.Binary("==",  g).GetBit(0))
-	assert.Equal(Undefined, g.Binary("==",  o).GetBit(0))
-	assert.Equal(Hi,        o.Binary("===", g).GetBit(0))
-	assert.Equal(Lo,        o.Binary("!==", g).GetBit(0))
-	assert.Equal(Hi,        g.Binary("===", o).GetBit(0))
-	assert.Equal(Lo,        g.Binary("!==", o).GetBit(0))
-	assert.Equal(Hi,        i.Binary("!==", o).GetBit(0))
-	assert.Equal(Lo,        i.Binary("===", o).GetBit(0))
-	
 }
 
 func TestValueCmpRelational(t *testing.T) {
-	assert := assert.New(t)
-
 	a := NewValue(1)
 	b, _ := NewValueString("1'b1")
 	c, _ := NewValueString("1'b0")
@@ -514,63 +524,65 @@ func TestValueCmpRelational(t *testing.T) {
 	n, _ := NewValueString("64'h1")
 	o, _ := NewValueString("64'b101z")
 
-	assert.Equal(Hi, a.Binary("<=", b).GetBit(0))
-	assert.Equal(Hi, a.Binary("<",  b).GetBit(0))
-	assert.Equal(Lo, a.Binary(">=", b).GetBit(0))
-	assert.Equal(Lo, a.Binary(">",  b).GetBit(0))
-	assert.Equal(Hi, a.Binary("<=", c).GetBit(0))
-	assert.Equal(Lo, a.Binary("<",  c).GetBit(0))
-	assert.Equal(Hi, c.Binary("<=", a).GetBit(0))
-	assert.Equal(Lo, c.Binary("<",  a).GetBit(0))
 
+	tests := []binaryTest {
+		{Hi, a, "<=", b},
+		{Hi, a, "<",  b},
+		{Lo, a, ">=", b},
+		{Lo, a, ">",  b},
+		{Hi, a, "<=", c},
+		{Lo, a, "<",  c},
+		{Hi, c, "<=", a},
+		{Lo, c, "<",  a},
+		{Hi, b, "<=", f},
+		{Hi, b, "<",  f},
+		{Lo, b, ">",  f},
+		{Lo, b, ">=", f},
+		{Lo, f, "<=", b},
+		{Lo, f, "<",  b},
+		{Hi, f, ">",  b},
+		{Hi, f, ">=", b},
+		{Hi, f, ">",  h},
+		{Hi, f, ">=", h},
+		{Lo, f, "<",  h},
+		{Lo, f, "<=", h},
+		{Lo, h, ">",  f},
+		{Lo, h, ">=", f},
+		{Hi, h, "<",  f},
+		{Hi, h, "<=", f},
+		{Lo, k, ">",  l},
+		{Lo, k, ">",  m},
+		{Hi, k, ">=", l},
+		{Hi, k, ">=", m},
+		{Hi, k, "<=", l},
+		{Hi, k, "<=", m},
+		{Lo, k, "<",  l},
+		{Lo, k, "<",  m},
+	}
+		
 	ops := []string{"<", "<=", ">", ">="}
-	for _, x := range []ValueInterface{a, b, c} {
-		for _, op := range ops {
-			assert.Equal(Undefined, x.Binary(op, d).GetBit(0))
-			assert.Equal(Undefined, x.Binary(op, e).GetBit(0))
-			assert.Equal(Undefined, d.Binary(op, x).GetBit(0))
-			assert.Equal(Undefined, e.Binary(op, x).GetBit(0))
+	for _, op := range ops {	
+		for _, x := range []ValueInterface{a, b, c} {
+			y := []binaryTest {
+				{Undefined, x, op, d},
+				{Undefined, x, op, e},
+				{Undefined, d, op, x},
+				{Undefined, e, op, x},
+			}
+			tests = append(tests, y...)
 		}
-	}
-
-	assert.Equal(Hi, b.Binary("<=", f).GetBit(0))
-	assert.Equal(Hi, b.Binary("<",  f).GetBit(0))
-	assert.Equal(Lo, b.Binary(">",  f).GetBit(0))
-	assert.Equal(Lo, b.Binary(">=", f).GetBit(0))
-	assert.Equal(Lo, f.Binary("<=", b).GetBit(0))
-	assert.Equal(Lo, f.Binary("<",  b).GetBit(0))
-	assert.Equal(Hi, f.Binary(">",  b).GetBit(0))
-	assert.Equal(Hi, f.Binary(">=", b).GetBit(0))
-	assert.Equal(Hi, f.Binary(">",  h).GetBit(0))
-	assert.Equal(Hi, f.Binary(">=", h).GetBit(0))
-	assert.Equal(Lo, f.Binary("<",  h).GetBit(0))
-	assert.Equal(Lo, f.Binary("<=", h).GetBit(0))
-	assert.Equal(Lo, h.Binary(">",  f).GetBit(0))
-	assert.Equal(Lo, h.Binary(">=", f).GetBit(0))
-	assert.Equal(Hi, h.Binary("<",  f).GetBit(0))
-	assert.Equal(Hi, h.Binary("<=", f).GetBit(0))
-
-	for _, x := range []ValueInterface{g, i, j, o} {
-		for _, op := range ops {
-			assert.Equal(Undefined, f.Binary(op, x).GetBit(0))
-			assert.Equal(Undefined, h.Binary(op, x).GetBit(0))
-			assert.Equal(Undefined, x.Binary(op, f).GetBit(0))
-			assert.Equal(Undefined, x.Binary(op, h).GetBit(0))
-			assert.Equal(Undefined, x.Binary(op, x).GetBit(0))
-			assert.Equal(Undefined, x.Binary(op, x).GetBit(0))
+		for _, x := range []ValueInterface{g, i, j, o} {
+			y := []binaryTest {
+				{Undefined, f, op, x},
+				{Undefined, h, op, x},
+				{Undefined, x, op, f},
+				{Undefined, x, op, h},
+				{Undefined, x, op, x},
+				{Undefined, x, op, x},
+			}
+			tests = append(tests, y...)
 		}
-	}
 
-	assert.Equal(Lo, k.Binary(">",  l).GetBit(0))
-	assert.Equal(Lo, k.Binary(">",  m).GetBit(0))
-	assert.Equal(Hi, k.Binary(">=", l).GetBit(0))
-	assert.Equal(Hi, k.Binary(">=", m).GetBit(0))
-	assert.Equal(Hi, k.Binary("<=", l).GetBit(0))
-	assert.Equal(Hi, k.Binary("<=", m).GetBit(0))
-	assert.Equal(Lo, k.Binary("<",  l).GetBit(0))
-	assert.Equal(Lo, k.Binary("<",  m).GetBit(0))
-
-	for _, op := range ops {
 		var exp LogicState
 		for _, x := range []ValueInterface{b, h} {
 			if strings.HasSuffix(op, "=") {
@@ -578,7 +590,10 @@ func TestValueCmpRelational(t *testing.T) {
 			} else {
 				exp = Lo
 			}
-			assert.Equal(exp, n.Binary(op, x).GetBit(0), "op = %s, x = %s", op, x)
+			y := []binaryTest {
+				{exp, n, op, x},
+			}
+			tests = append(tests, y...)
 		}
 		for _, x := range []ValueInterface{f, k, l, m} {
 			if strings.HasPrefix(op, "<") {
@@ -586,9 +601,199 @@ func TestValueCmpRelational(t *testing.T) {
 			} else {
 				exp = Lo
 			}
-			assert.Equal(exp, n.Binary(op, x).GetBit(0), "op = %s, x = %s", op, x)
-			assert.Equal(exp.Unary('~'), x.Binary(op, n).GetBit(0))
+			y := []binaryTest {
+				{exp, n, op, x},
+				{exp.Unary('~'), x, op, n},
+			}
+			tests = append(tests, y...)
 		}
 	}
 
+	runBinaryTests(t, tests)
+}
+
+func TestValueBinLogical(t *testing.T) {
+	a := NewValue(1)
+	b, _ := NewValueString("1'b1")
+	c, _ := NewValueString("1'b0")
+	d, _ := NewValueString("1'bx")
+	e, _ := NewValueString("1'bz")
+	f, _ := NewValueString("4'b1010")
+	g, _ := NewValueString("4'b101z")
+	h, _ := NewValueString("4'b0001")
+	i, _ := NewValueString("4'b101x")
+	j, _ := NewValueString("5'b0101x")
+	k, _ := NewValueString("4'b0")
+	l, _ := NewValueString("66'hdeadbeef")
+	m, _ := NewValueString("32'hdeadbeef")
+	n, _ := NewValueString("65'h0")
+	o, _ := NewValueString("64'b101z")
+	p, _ := NewValueString("65'bz")
+
+	tests := []binaryTest {
+		{Hi,        a, "||", b},
+		{Lo,        a, "||", a},
+		{Lo,        a, "||", c},
+		{Undefined, a, "||", d},
+		{Hi,        b, "||", d},
+		{Undefined, d, "||", e},
+		{Lo,        a, "&&", b},
+		{Lo,        a, "&&", a},
+		{Lo,        a, "&&", c},
+		{Undefined, a, "&&", d},
+		{Undefined, b, "&&", d},
+		{Undefined, d, "&&", e},
+		{Hi,        b, "&&", b},
+
+		{Hi,        f, "||", g},
+		{Hi,        f, "||", h},
+		{Hi,        f, "||", j},
+		{Hi,        f, "||", a},
+		{Hi,        h, "||", a},
+		{Hi,        h, "||", j},
+		{Hi,        i, "||", j},
+		{Lo,        c, "||", k},
+		{Undefined, k, "||", d},
+		{Hi,        f, "&&", g},
+		{Hi,        f, "&&", h},
+		{Lo,        f, "&&", k},
+		{Lo,        g, "&&", k},
+		{Undefined, f, "&&", d},
+		{Undefined, k, "&&", d},
+		{Lo,        b, "&&", k},
+		{Lo,        c, "&&", k},
+
+		{Hi,        l, "||", m},
+		{Hi,        l, "||", n},
+		{Hi,        l, "||", f},
+		{Hi,        l, "||", k},
+		{Hi,        l, "||", a},
+		{Hi,        l, "||", b},
+		{Hi,        l, "||", d},
+		{Hi,        o, "||", d},
+		{Lo,        c, "||", n},
+		{Lo,        k, "||", n},
+		{Undefined, c, "||", p},
+		{Undefined, e, "||", p},
+		{Hi,        l, "&&", m},
+		{Hi,        l, "&&", o},
+		{Undefined, l, "&&", p},
+		{Lo,        l, "&&", n},
+		{Lo,        m, "&&", n},
+		{Lo,        o, "&&", n},
+	}
+	runBinaryTests(t, tests)
+}
+
+func TestValueBinBitwise(t *testing.T) {
+	assert := assert.New(t)
+	
+	a := NewValue(1)
+	b, _ := NewValueString("1'b1")
+	c, _ := NewValueString("1'b0")
+	d, _ := NewValueString("1'bx")
+	e, _ := NewValueString("1'bz")
+	f, _ := NewValueString("4'b1010")
+	g, _ := NewValueString("4'b101z")
+	h, _ := NewValueString("4'b0001")
+	i, _ := NewValueString("4'b101x")
+	j, _ := NewValueString("5'b0101x")
+	k, _ := NewValueString("4'b0")
+	l, _ := NewValueString("66'hdeadbeef")
+	m, _ := NewValueString("32'hdeadbeef")
+	n, _ := NewValueString("65'h0")
+	o, _ := NewValueString("64'b101z")
+	p, _ := NewValueString("65'bz")
+
+	assert.Equal(Hi, a.Binary("&",  b).Binary("===", a).GetBit(0))
+	assert.Equal(Hi, a.Binary("&",  d).Binary("===", d).GetBit(0))
+	assert.Equal(Hi, a.Binary("&",  e).Binary("===", d).GetBit(0))
+	assert.Equal(Hi, c.Binary("&",  b).Binary("===", a).GetBit(0))
+	assert.Equal(Hi, b.Binary("&",  b).Binary("===", b).GetBit(0))
+	assert.Equal(Hi, a.Binary("|",  b).Binary("===", b).GetBit(0))
+	assert.Equal(Hi, a.Binary("|",  c).Binary("===", c).GetBit(0))
+	assert.Equal(Hi, b.Binary("|",  d).Binary("===", b).GetBit(0))
+	assert.Equal(Hi, b.Binary("|",  e).Binary("===", b).GetBit(0))
+	assert.Equal(Hi, b.Binary("^",  e).Binary("===", d).GetBit(0))
+	assert.Equal(Hi, a.Binary("^",  c).Binary("===", a).GetBit(0))
+	assert.Equal(Hi, b.Binary("^",  c).Binary("===", b).GetBit(0))
+	assert.Equal(Hi, b.Binary("^",  b).Binary("===", c).GetBit(0))
+	assert.Equal(Hi, b.Binary("^~", e).Binary("===", d).GetBit(0))
+	assert.Equal(Hi, a.Binary("^~", c).Binary("===", b).GetBit(0))
+	assert.Equal(Hi, b.Binary("^~", c).Binary("===", c).GetBit(0))
+	assert.Equal(Hi, b.Binary("^~", b).Binary("===", b).GetBit(0))
+
+	fAndg, _ := NewValueString("4'b1010")
+	fAndh, _ := NewValueString("4'b0")
+	gAndh, _ := NewValueString("4'b000x")
+	fAndi := fAndg
+	fOrh,  _ := NewValueString("4'b1011")
+	iXorj, _ := NewValueString("5'b0000x")
+	fXnorg, _ := NewValueString("4'b111x")
+	gXnorh, _ := NewValueString("4'b010x")
+	fXnorh, _ := NewValueString("4'b0100")
+	bXnorh, _ := NewValueString("4'hf")
+	assert.Equal(Hi, f.Binary("&",  g).Binary("===", fAndg).GetBit(0))
+	assert.Equal(Hi, f.Binary("&",  h).Binary("===", fAndh).GetBit(0))
+	assert.Equal(Hi, g.Binary("&",  h).Binary("===", gAndh).GetBit(0))
+	assert.Equal(Hi, g.Binary("&",  i).Binary("===", i).GetBit(0))
+	assert.Equal(Hi, f.Binary("&",  i).Binary("===", fAndi).GetBit(0))
+	assert.Equal(Hi, h.Binary("&",  b).Binary("===", h).GetBit(0))
+	assert.Equal(Hi, h.Binary("&",  c).Binary("===", k).GetBit(0))
+	assert.Equal(Hi, f.Binary("|",  g).Binary("===", i).GetBit(0))
+	assert.Equal(Hi, f.Binary("|",  h).Binary("===", fOrh).GetBit(0))
+	assert.Equal(Hi, g.Binary("|",  d).Binary("===", i).GetBit(0))
+	assert.Equal(Hi, d.Binary("|",  g).Binary("===", i).GetBit(0))
+	assert.Equal(Hi, i.Binary("|",  j).Binary("===", j).GetBit(0))
+	assert.Equal(Hi, j.Binary("|",  i).Binary("===", j).GetBit(0))
+	assert.Equal(Hi, j.Binary("^",  i).Binary("===", iXorj).GetBit(0))
+	assert.Equal(Hi, i.Binary("^",  j).Binary("===", iXorj).GetBit(0))
+	assert.Equal(Hi, i.Binary("^",  h).Binary("===", i).GetBit(0))
+	assert.Equal(Hi, k.Binary("^",  k).Binary("===", k).GetBit(0))
+	assert.Equal(Hi, f.Binary("^",  h).Binary("===", fOrh).GetBit(0))
+	assert.Equal(Hi, g.Binary("^",  h).Binary("===", i).GetBit(0))
+	assert.Equal(Hi, g.Binary("^~", f).Binary("===", fXnorg).GetBit(0))
+	assert.Equal(Hi, g.Binary("^~", h).Binary("===", gXnorh).GetBit(0))
+	assert.Equal(Hi, f.Binary("^~", h).Binary("===", fXnorh).GetBit(0))
+	assert.Equal(Hi, b.Binary("^~", h).Binary("===", bXnorh).GetBit(0))
+
+	lAndn, _ := NewValueString("65'h0")
+	lAndo, _ := NewValueString("66'b101x")
+	oOrg,  _ := NewValueString("64'b101x")
+	oOrh,  _ := NewValueString("64'b1011")
+	lXoro, _ := NewValueString("66'hdeadbee4")
+	lXoro.SetBit(0, Undefined)
+	lXnorm, _ := NewValueString("66'h3ffffffffffffffff")
+	lXnoro, _ := NewValueString("66'h3ffffffff2152411a")
+	lXnoro.SetBit(0, Undefined)
+	eXnorp, _ := NewValueString("65'h1ffffffffffffffff")
+	eXnorp.SetBit(0, Undefined)
+	assert.Equal(Hi, l.Binary("&",  m).Binary("===", l).GetBit(0))
+	assert.Equal(Hi, l.Binary("&",  n).Binary("===", lAndn).GetBit(0))
+	assert.Equal(Hi, l.Binary("&",  n).Binary("!==", l).GetBit(0))
+	assert.Equal(Hi, l.Binary("&",  o).Binary("===", lAndo).GetBit(0))
+	assert.Equal(Hi, o.Binary("&",  g).Binary("===", lAndo).GetBit(0))	
+	assert.Equal(Hi, n.Binary("&",  b).Binary("===", n).GetBit(0))
+	assert.Equal(Hi, n.Binary("&",  c).Binary("===", n).GetBit(0))
+	assert.Equal(Hi, b.Binary("&",  n).Binary("===", n).GetBit(0))
+	assert.Equal(Hi, c.Binary("&",  n).Binary("===", n).GetBit(0))
+	assert.Equal(Hi, p.Binary("&",  e).Binary("===", d).GetBit(0))
+	assert.Equal(Hi, l.Binary("|",  m).Binary("===", l).GetBit(0))
+	assert.Equal(Hi, l.Binary("|",  n).Binary("===", l).GetBit(0))
+	assert.Equal(Hi, l.Binary("|",  o).Binary("===", l).GetBit(0))
+	assert.Equal(Hi, o.Binary("|",  g).Binary("===", oOrg).GetBit(0))
+	assert.Equal(Hi, n.Binary("|",  b).Binary("===", b).GetBit(0))
+	assert.Equal(Hi, n.Binary("|",  c).Binary("===", c).GetBit(0))
+	assert.Equal(Hi, o.Binary("|",  h).Binary("===", oOrh).GetBit(0))
+	assert.Equal(Hi, l.Binary("^",  m).Binary("===", a).GetBit(0))
+	assert.Equal(Hi, l.Binary("^",  o).Binary("===", lXoro).GetBit(0))
+	assert.Equal(Hi, l.Binary("^",  g).Binary("===", lXoro).GetBit(0))
+	assert.Equal(Hi, e.Binary("^",  p).Binary("===", d).GetBit(0))
+	assert.Equal(Hi, e.Binary("^",  n).Binary("===", d).GetBit(0))
+	assert.Equal(Hi, l.Binary("^~", m).Binary("===", lXnorm).GetBit(0))
+	assert.Equal(Hi, l.Binary("^~", o).Binary("===", lXnoro).GetBit(0))
+	assert.Equal(Hi, l.Binary("^~", g).Binary("===", lXnoro).GetBit(0))
+	assert.Equal(Hi, e.Binary("^~", p).Binary("===", eXnorp).GetBit(0))
+	assert.Equal(Hi, e.Binary("^~", n).Binary("===", eXnorp).GetBit(0))
+	
 }
