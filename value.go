@@ -47,6 +47,7 @@ type Value64 struct {
 	bits uint64
 	hiz uint64
 	undef uint64
+	mask uint64
 }
 
 // Value struct capable of representing >64 bits 
@@ -55,6 +56,7 @@ type ValueBig struct {
 	bits *big.Int
 	hiz *big.Int
 	undef *big.Int
+	mask *big.Int
 }
 
 type ValueInterface interface {
@@ -326,10 +328,9 @@ func (X *Value64) GetBitRange(low, high uint) ValueInterface {
 		return Z
 	} else {
 		Z := NewValue(newNumBits).(*Value64)
-		mask := uint64(1 << newNumBits) - 1
-		Z.bits = (X.bits >> low) & mask
-		Z.hiz = (X.hiz >> low) & mask
-		Z.undef = (X.undef >> low) & mask
+		Z.bits = (X.bits >> low) & Z.mask
+		Z.hiz = (X.hiz >> low) & Z.mask
+		Z.undef = (X.undef >> low) & Z.mask
 		return Z
 	}
 }
@@ -354,23 +355,18 @@ func (X *ValueBig) GetBitRange(low, high uint) ValueInterface {
 	} else if newNumBits <= 64 {
 		t := new(big.Int)
 		Z := NewValue(newNumBits).(*Value64)
-		mask := uint64(1 << newNumBits) - 1
-		Z.bits  = t.Rsh(X.bits,  low).Uint64() & mask
+		Z.bits  = t.Rsh(X.bits,  low).Uint64() & Z.mask
 		t.SetUint64(uint64(0))
-		Z.hiz   = t.Rsh(X.hiz,   low).Uint64() & mask
+		Z.hiz   = t.Rsh(X.hiz,   low).Uint64() & Z.mask
 		t.SetUint64(uint64(0))
-		Z.undef = t.Rsh(X.undef, low).Uint64() & mask
+		Z.undef = t.Rsh(X.undef, low).Uint64() & Z.mask
 		return Z
 	} else {
 		Z := NewValue(newNumBits).(*ValueBig)
-		one := new(big.Int)
-		one.SetUint64(uint64(1))
-		mask := new(big.Int)
-		mask.Sub(mask.Lsh(one, newNumBits), one)
 
-		Z.bits.And(Z.bits.Rsh(X.bits, low), mask)
-		Z.hiz.And(Z.hiz.Rsh(X.hiz, low), mask)
-		Z.undef.And(Z.undef.Rsh(X.undef, low), mask)
+		Z.bits.And(Z.bits.Rsh(X.bits, low), Z.mask)
+		Z.hiz.And(Z.hiz.Rsh(X.hiz, low), Z.mask)
+		Z.undef.And(Z.undef.Rsh(X.undef, low), Z.mask)
 		return Z
 	}
 }
@@ -549,18 +545,16 @@ func (X *Value1) Unary(op string) ValueInterface {
 // | (bitwise OR), ~| (bitwise NOR), & (bitwise AND), ~& (bitwise NAND),
 // ^ (bitwise XOR / even parity), ~^ (bitwise XNOR / odd parity).
 func (X *Value64) Unary(op string) ValueInterface {
-	mask := uint64(1 << X.numBits - 1)
-
 	switch op {
 	case "~":
 		Z := X.copy()
-		Z.bits = mask &^ Z.bits &^ (Z.hiz | Z.undef)
+		Z.bits = X.mask &^ Z.bits &^ (Z.hiz | Z.undef)
 		return Z
 	case "|", "~|":
 		Z := NewValue(1)
-		if X.bits & mask != 0 {
+		if X.bits & X.mask != 0 {
 			Z.SetBit(0, Hi)
-		} else if X.hiz & mask != 0 || X.undef & mask != 0 {
+		} else if X.hiz & X.mask != 0 || X.undef & X.mask != 0 {
 			Z.SetBit(0, Undefined)
 		}
 		if op == "~|" {
@@ -569,10 +563,10 @@ func (X *Value64) Unary(op string) ValueInterface {
 		return Z
 	case "&", "~&":
 		Z := NewValue(1)
-		if X.hiz & mask != 0 || X.undef & mask != 0 {
+		if X.hiz & X.mask != 0 || X.undef & X.mask != 0 {
 			Z.SetBit(0, Undefined)
 		} else {
-			if X.bits == mask {
+			if X.bits == X.mask {
 				Z.SetBit(0, Hi)
 			}
 			if op == "~&" {
@@ -582,7 +576,7 @@ func (X *Value64) Unary(op string) ValueInterface {
 		return Z
 	case "^", "~^":
 		Z := NewValue(1)
-		if X.hiz & mask != 0 || X.undef & mask != 0 {
+		if X.hiz & X.mask != 0 || X.undef & X.mask != 0 {
 			Z.SetBit(0, Undefined)
 		} else {
 			// XOR each byte and then look up the resultant
@@ -651,10 +645,7 @@ func (X *ValueBig) Unary(op string) ValueInterface {
 		if X.hiz.Cmp(&zero) != 0 || X.undef.Cmp(&zero) != 0 {
 			Z.SetBit(0, Undefined)
 		} else {
-			mask := new(big.Int)
-			one := big.NewInt(int64(1))
-			mask.Sub(mask.Lsh(one, uint(X.numBits)), one)
-			if X.bits.Cmp(mask) == 0 {
+			if X.bits.Cmp(X.mask) == 0 {
 				Z.SetBit(0, Hi)
 			}
 			if op == "~&" {
@@ -1477,6 +1468,7 @@ func NewValue(numBits uint) ValueInterface {
 	case numBits <= 64:
 		val := new(Value64)
 		val.numBits = numBits
+		val.mask = uint64((1 << numBits) - 1)
 		return val
 	case numBits > 64:
 		val := new(ValueBig)
@@ -1484,6 +1476,12 @@ func NewValue(numBits uint) ValueInterface {
 		val.bits  = new(big.Int)
 		val.hiz   = new(big.Int)
 		val.undef = new(big.Int)
+		val.mask  = new(big.Int)
+
+		one := new(big.Int)
+		one.SetUint64(uint64(1))
+		val.mask.Sub(val.mask.Lsh(one, numBits), one)
+		
 		return val
 	default:
 		return nil
