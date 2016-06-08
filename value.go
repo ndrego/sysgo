@@ -85,7 +85,7 @@ type ValueInterface interface {
 	cmpRelational(string, ValueInterface) *Value1
 	binLogical(string, ValueInterface) *Value1
 	binBitwise(string, ValueInterface) ValueInterface
-	// binArithmetic(string, ValueInterface) ValueInterface
+	binArithmetic(string, ValueInterface) ValueInterface
 }
 
 func (X *Value1) copy() (Z *Value1) {
@@ -197,6 +197,52 @@ func (X *ValueBig) toValue64(numBits uint) (Y *Value64) {
 	}
 			
 	return X.GetBitRange(0, m).(*Value64)
+}
+
+func (X *Value1) SetAll(l LogicState) {
+	X.v = l
+}
+
+func (X *Value64) SetAll(l LogicState) {
+	switch l {
+	case Lo:
+		X.bits  = uint64(0)
+		X.hiz   = uint64(0)
+		X.undef = uint64(0)
+	case Hi:
+		X.bits  = X.mask
+		X.hiz   = uint64(0)
+		X.undef = uint64(0)
+	case HiZ:
+		X.bits  = uint64(0)
+		X.hiz   = X.mask
+		X.undef = uint64(0)
+	case Undefined:
+		X.bits  = uint64(0)
+		X.hiz   = uint64(0)
+		X.undef = X.mask
+	}
+}
+
+func (X *ValueBig) SetAll(l LogicState) {
+	switch l {
+	case Lo:
+		X.bits.SetUint64( uint64(0))
+		X.hiz.SetUint64(  uint64(0))
+		X.undef.SetUint64(uint64(0))
+	case Hi:
+		X.bits.Set(X.mask)
+		X.hiz.SetUint64(  uint64(0))
+		X.undef.SetUint64(uint64(0))
+	case HiZ:
+		X.bits.SetUint64( uint64(0))
+		X.hiz.Set(X.mask)
+		X.undef.SetUint64(uint64(0))
+	case Undefined:
+		X.bits.SetUint64( uint64(0))
+		X.hiz.SetUint64(  uint64(0))
+		X.undef.Set(X.mask)
+	}
 }
 
 func (X *Value1) BitLen() uint {
@@ -1198,6 +1244,187 @@ func (X *ValueBig) binBitwise(op string, Y ValueInterface) ValueInterface {
 	
 }
 
+func (X *Value1) binArithmetic(op string, Y ValueInterface) (Z ValueInterface) {
+	switch Y := Y.(type) {
+	case *Value1:
+		switch op {
+		case "+":
+			if X.v > Hi || Y.v > Hi {
+				Z, _ = NewValueString("2'bxx")
+			} else if X.v == Hi && Y.v == Hi {
+				Z, _ = NewValueString("2'b10")
+			} else if X.v == Lo && Y.v == Lo {
+				Z, _ = NewValueString("2'b00")
+			} else {
+				Z, _ = NewValueString("2'b01")
+			}
+		case "-":
+			if X.v > Hi || Y.v > Hi {
+				Z, _ = NewValueString("2'bxx")
+			} else if X.v == Y.v {
+				Z, _ = NewValueString("2'b00")
+			} else {
+				Z, _ = NewValueString("2'b01")
+			}
+		case "*":
+			if X.v > Hi || Y.v > Hi {
+				Z, _ = NewValueString("1'bx")
+			} else if X.v == Lo || Y.v == Lo {
+				Z, _ = NewValueString("1'b0")
+			} else {
+				Z, _ = NewValueString("1'b1")
+			}
+		case "/":
+			if X.v > Hi || Y.v > Hi || Y.v == Lo {
+				Z, _ = NewValueString("1'bx")
+			} else if X.v == Hi && Y.v == Hi {
+				Z, _ = NewValueString("1'b1")
+			} else {
+				Z, _ = NewValueString("1'b0")
+			}
+		case "%":
+			if X.v > Hi || Y.v > Hi || Y.v == Lo {
+				Z, _ = NewValueString("1'bx")
+			} else {
+				Z, _ = NewValueString("1'b0")
+			}
+		}
+	case *Value64:
+		Z = X.toValue64(0).binArithmetic(op, Y)
+	case *ValueBig:
+		Z = X.toValueBig(0).binArithmetic(op, Y)
+		
+	}
+	return
+}
+
+func (X *Value64) binArithmetic(op string, Y ValueInterface) ValueInterface {
+	var n *Value64
+	switch Y := Y.(type) {
+	case *Value1:
+		n = Y.toValue64(0)
+	case *Value64:
+		n = Y
+	case *ValueBig:
+		return X.toValueBig(0).binArithmetic(op, Y)
+	}
+
+	maxBits := X.numBits
+	if n.numBits > X.numBits {
+		maxBits = n.numBits
+	}
+	var Z *Value64
+	switch op {
+	case "+":
+		if maxBits + 1 > 64 {
+			return X.toValueBig(0).binArithmetic(op, n.toValueBig(0))
+		}
+		
+		Z = NewValue(maxBits + 1).(*Value64)
+		if X.HasUndef() || X.HasHiz() || n.HasUndef() || n.HasHiz() {
+			Z.SetAll(Undefined)
+		} else {
+			Z.bits = (X.bits + n.bits) & Z.mask
+		}
+	case "-":
+		Z = NewValue(maxBits).(*Value64)
+		if X.HasUndef() || X.HasHiz() || n.HasUndef() || n.HasHiz() {
+			Z.SetAll(Undefined)
+		} else {
+			// In the case of unsigned subtraction, Z is the same
+			// number of bits as the largest operand and we mask out
+			// to get modular arithmetic (i.e. wrap-around) in the
+			// case of Y < X, which would result in a negative number.
+			// When signed arithmetic is implemented, we will need to
+			// handle that separately.
+			Z.bits = (X.bits - n.bits) & Z.mask
+		}
+	case "*":
+		if X.numBits + n.numBits > 64 {
+			return X.toValueBig(0).binArithmetic(op, n.toValueBig(0))
+		}
+		
+		Z = NewValue(X.numBits + n.numBits).(*Value64)
+		if X.HasUndef() || X.HasHiz() || n.HasUndef() || n.HasHiz() {
+			Z.SetAll(Undefined)
+		} else {
+			Z.bits = (X.bits * n.bits) & Z.mask
+		}
+	case "/", "%":
+		Z = NewValue(maxBits).(*Value64)
+		if X.HasUndef() || X.HasHiz() || n.HasUndef() || n.HasHiz() || n.IsZero() {
+			Z.SetAll(Undefined)
+		} else {
+			if op == "/" {
+				Z.bits = (X.bits / n.bits) & Z.mask
+			} else {
+				Z.bits = (X.bits % n.bits) & Z.mask
+			}
+		}
+	}
+	return Z
+}
+
+func (X *ValueBig) binArithmetic(op string, Y ValueInterface) ValueInterface {
+	var n *ValueBig
+	switch Y := Y.(type) {
+	case *Value1:
+		n = Y.toValueBig(0)
+	case *Value64:
+		n = Y.toValueBig(0)
+	case *ValueBig:
+		n = Y
+	}
+	
+	maxBits := X.numBits
+	if n.numBits > X.numBits {
+		maxBits = n.numBits
+	}
+
+	var Z *ValueBig
+	switch op {
+	case "+":
+		Z = NewValue(maxBits + 1).(*ValueBig)
+		if X.HasUndef() || X.HasHiz() || n.HasUndef() || n.HasHiz() {
+			Z.SetAll(Undefined)
+		} else {
+			Z.bits.Add(X.bits, n.bits).And(Z.bits, Z.mask)
+		}
+	case "-":
+		Z = NewValue(maxBits).(*ValueBig)
+		if X.HasUndef() || X.HasHiz() || n.HasUndef() || n.HasHiz() {
+			Z.SetAll(Undefined)
+		} else {
+			// In the case of unsigned subtraction, Z is the same
+			// number of bits as the largest operand and we mask out
+			// to get modular arithmetic (i.e. wrap-around) in the
+			// case of Y < X, which would result in a negative number.
+			// When signed arithmetic is implemented, we will need to
+			// handle that separately.
+			Z.bits.Sub(X.bits, n.bits).And(Z.bits, Z.mask)
+		}
+	case "*":
+		Z = NewValue(X.numBits + n.numBits).(*ValueBig)
+		if X.HasUndef() || X.HasHiz() || n.HasUndef() || n.HasHiz() {
+			Z.SetAll(Undefined)
+		} else {
+			Z.bits.Mul(X.bits, n.bits).And(Z.bits, Z.mask)
+		}
+	case "/", "%":
+		Z = NewValue(maxBits).(*ValueBig)
+		if X.HasUndef() || X.HasHiz() || n.HasUndef() || n.HasHiz() || n.IsZero() {
+			Z.SetAll(Undefined)
+		} else {
+			if op == "/" {
+				Z.bits.Div(X.bits, n.bits).And(Z.bits, Z.mask)
+			} else {
+				Z.bits.Mod(X.bits, n.bits).And(Z.bits, Z.mask)
+			}
+		}
+	}
+	return Z
+}
+
 func (X *Value1) Binary(op string, Y ValueInterface) (Z ValueInterface) {
 	switch op {
 	case "==", "!=", "===", "!==":
@@ -1212,6 +1439,9 @@ func (X *Value1) Binary(op string, Y ValueInterface) (Z ValueInterface) {
 	case "&", "|", "^", "^~", "~^":
 		// Bitwise operators
 		Z = X.binBitwise(op, Y)
+	case "+", "-", "*", "/", "%":
+		// Arithmetic operators
+		Z = X.binArithmetic(op, Y)
 	default:
 		fmt.Printf("WARNING: %s is not a defined operator, returning Undefined.\n", op)
 		Z, _ = NewValueString("1'bx")		
@@ -1233,6 +1463,9 @@ func (X *Value64) Binary(op string, Y ValueInterface) (Z ValueInterface) {
 	case "&", "|", "^", "^~", "~^":
 		// Bitwise operators
 		Z = X.binBitwise(op, Y)
+	case "+", "-", "*", "/", "%":
+		// Arithmetic operators
+		Z = X.binArithmetic(op, Y)
 	default:
 		fmt.Printf("WARNING: %s is not a defined operator, returning Undefined.\n", op)
 		Z, _ = NewValueString("1'bx")		
@@ -1254,6 +1487,9 @@ func (X *ValueBig) Binary(op string, Y ValueInterface) (Z ValueInterface) {
 	case "&", "|", "^", "^~", "~^":
 		// Bitwise operators
 		Z = X.binBitwise(op, Y)
+	case "+", "-", "*", "/", "%":
+		// Arithmetic operators
+		Z = X.binArithmetic(op, Y)
 	default:
 		fmt.Printf("WARNING: %s is not a defined operator, returning Undefined.\n", op)
 		Z, _ = NewValueString("1'bx")		
